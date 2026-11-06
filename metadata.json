@@ -1,0 +1,6 @@
+{
+  "name": "Yadet",
+  "description": "دستیار هوشمند مکالمه‌ای و صوتی برای مدیریت قرارها، یادآورها، اهداف و تنظیمات برنامه",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

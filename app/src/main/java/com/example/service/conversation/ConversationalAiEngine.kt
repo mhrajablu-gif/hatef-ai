@@ -1,0 +1,1584 @@
+package com.example.service.conversation
+
+import com.example.data.engine.PersianDateEngine
+import com.example.data.model.ReminderEntity
+import com.example.service.ai.ParsedTask
+import com.example.service.ai.PersianCommandAnalyzer
+import com.example.service.ai.ValidationStatus
+import java.util.Calendar
+import java.util.TimeZone
+
+data class ConversationalResponse(
+    val replyText: String,
+    val newState: ConversationState,
+    val actionCard: ConversationActionCard? = null,
+    val suggestedReplies: List<String> = emptyList(),
+    val executedResult: ToolResult? = null
+)
+
+/**
+ * Intelligent Multi-Turn Persian Conversational Agent.
+ * Handles:
+ * 1. General conversation, explanations, advice, learning, and ideation (General AI Chatbot)
+ * 2. Multi-turn slot-filling and natural dialogue
+ * 3. Disambiguation when multiple matching reminders exist (asking user to select exact one)
+ * 4. Semantic distinction between deletion vs alarm cancellation
+ * 5. Relative offsets, corrections, anaphora/references, and 10 executive tools
+ */
+class ConversationalAiEngine(
+    private val toolRegistry: AssistantToolRegistry? = null,
+    private val defaultTimeZone: TimeZone = TimeZone.getTimeZone("Asia/Tehran")
+) {
+
+    private val generalAiService = GeneralConversationalAiService()
+
+    /**
+     * Processes a single turn of user conversation given the current state and recent history.
+     */
+    suspend fun processTurn(
+        userInput: String,
+        currentState: ConversationState,
+        recentHistory: List<ChatMessage> = emptyList(),
+        referenceTimeMillis: Long = System.currentTimeMillis(),
+        timeZone: TimeZone = defaultTimeZone
+    ): ConversationalResponse {
+        val cleanInput = userInput.trim()
+        if (cleanInput.isBlank()) {
+            return ConversationalResponse(
+                replyText = "لطفاً فرمان یا سؤالتان را بفرمایید.",
+                newState = currentState
+            )
+        }
+
+        // 1. Check if user is responding to an active pending question
+        if (currentState.isWaitingForAnswer()) {
+            val pendingResolution = handlePendingAnswer(cleanInput, currentState, referenceTimeMillis, timeZone)
+            if (pendingResolution != null) {
+                return pendingResolution
+            }
+        }
+
+        // 2. Check for explicit corrections to previous statements ("نه، منظورم فردا نبود، پسفردا بود")
+        if (isCorrection(cleanInput) && currentState.draftTask != null) {
+            return handleCorrection(cleanInput, currentState, referenceTimeMillis, timeZone)
+        }
+
+        // 3. Check for casual conversation / chit-chat / greetings ("سلام، حالت چطوره؟")
+        val chitChatReply = checkChitChatOrGreeting(cleanInput)
+        if (chitChatReply != null) {
+            return ConversationalResponse(
+                replyText = chitChatReply.first,
+                newState = currentState.copy(
+                    activeIntent = ConversationIntent.GREETING_OR_CHITCHAT,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                ),
+                suggestedReplies = chitChatReply.second
+            )
+        }
+
+        // 4. Check for consultation & reasoning questions ("به نظرت ورزش ساعت ۱۲ شب خوبه؟", "من فردا ساعت ۸ بیدار میشم به نظرت چه ساعتی ورزش کنم؟", "میخوام هر روز ۴ ساعت بخوابم")
+        if (isConsultationOrAdviceQuestion(cleanInput)) {
+            val advisoryReply = generalAiService.generateChatReply(
+                userMessage = cleanInput,
+                recentHistory = recentHistory,
+                userContextSummary = toolRegistry?.getUserMemoryPreferences()?.message
+            )
+            return ConversationalResponse(
+                replyText = advisoryReply,
+                newState = currentState.copy(
+                    activeIntent = ConversationIntent.CONSULTATION_OR_ADVICE,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                ),
+                suggestedReplies = listOf("ساعت ۸ شب تنظیم کن", "یک ساعت مناسب پیشنهاد بده", "ممنون از راهنماییت")
+            )
+        }
+
+        // 5. Check for user routine / habit declarations ("من معمولاً ساعت ۸ صبح بیدار میشم")
+        val routineResponse = handleUserRoutineStatement(cleanInput, currentState)
+        if (routineResponse != null) {
+            return routineResponse
+        }
+
+        // 6. Check for application setting commands ("از این به بعد ۱۵ دقیقه قبل هم یادآوری کن", "تم رو تاریک کن")
+        val appSettingResponse = handleAppSettingCommand(cleanInput, currentState)
+        if (appSettingResponse != null) {
+            return appSettingResponse
+        }
+
+        // 7. Check for references to previous reminders ("اون رو نیم ساعت عقب بنداز", "قرار فردام رو دو ساعت عقب بنداز", "اون قراری که دیروز تنظیم کردیم رو برای هفته بعد ببر", "قرارم رو حذف کن")
+        val referenceAction = handleReferenceToPast(cleanInput, currentState, referenceTimeMillis, timeZone)
+        if (referenceAction != null) {
+            return referenceAction
+        }
+
+        // 8. Check for questions about existing reminders ("چه یادآورهایی دارم؟", "قرارهای این هفته")
+        if (isQueryRemindersIntent(cleanInput)) {
+            return handleQueryReminders(cleanInput, currentState, referenceTimeMillis, timeZone)
+        }
+
+        // 9. Check if input is a Reminder / Appointment Action
+        if (isAppointmentOrReminderAction(cleanInput)) {
+            return handleAppointmentOrReminderAction(cleanInput, currentState, referenceTimeMillis, timeZone)
+        }
+
+        // 10. General Knowledge / Ideation / Explanations / Everyday Chatbot (General AI Chatbot)
+        if (isMeaningfulQuestionOrIdeation(cleanInput)) {
+            val generalReply = generalAiService.generateChatReply(
+                userMessage = cleanInput,
+                recentHistory = recentHistory,
+                userContextSummary = toolRegistry?.getUserMemoryPreferences()?.message
+            )
+            return ConversationalResponse(
+                replyText = generalReply,
+                newState = currentState.copy(
+                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                ),
+                suggestedReplies = listOf("فردا ساعت ۱۰ یادم بنداز", "یادآورهای امروز من چیه؟", "بیشتر توضیح بده")
+            )
+        }
+
+        // 11. Unrecognized or ambiguous gibberish
+        return ConversationalResponse(
+            replyText = "متوجه درخواست شما نشدم؛ لطفاً واضح‌تر بفرمایید، یا بگویید چه کاری و در چه زمانی را مایلید یادتان بیندازم.",
+            newState = currentState.copy(
+                activeIntent = ConversationIntent.UNKNOWN,
+                awaitingField = AwaitingField.NONE,
+                slotStatus = SlotFillingStatus.IDLE
+            ),
+            suggestedReplies = listOf("فردا ۱۰ صبح یادم بنداز برم بانک", "یادآورهای امروز", "هوش مصنوعی چطور کار می‌کنه؟")
+        )
+    }
+
+    /**
+     * Handles answering an active clarification question
+     */
+    private suspend fun handlePendingAnswer(
+        input: String,
+        state: ConversationState,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): ConversationalResponse? {
+        val draft = state.draftTask
+
+        when (state.awaitingField) {
+            AwaitingField.EXECUTION_CONFIRMATION -> {
+                if (isCorrection(input) && draft != null) {
+                    return handleCorrection(input, state, referenceTimeMillis, timeZone)
+                } else if (isPositiveConfirmation(input)) {
+                    // Confirmed: Execute creation or update
+                    return executeConfirmedDraft(draft, state)
+                } else if (isNegativeRejection(input)) {
+                    // Rejected: Cancel and reset
+                    return ConversationalResponse(
+                        replyText = "تنظیم یادآور لغو شد. دستور یا یادآوری دیگری دارید؟",
+                        newState = state.copy(
+                            slotStatus = SlotFillingStatus.CANCELLED,
+                            awaitingField = AwaitingField.NONE,
+                            draftTask = null,
+                            lastAssistantQuestion = null
+                        ),
+                        suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورهای من")
+                    )
+                }
+            }
+
+            AwaitingField.AMBIGUOUS_HOUR_AM_PM -> {
+                if (draft != null) {
+                    val resolved = resolveHourAmbiguity(input, draft, timeZone)
+                    if (resolved != null) {
+                        return proceedToConfirmationOrCompletion(resolved, state)
+                    }
+                }
+            }
+
+            AwaitingField.TITLE -> {
+                if (draft != null) {
+                    val cleanTitle = extractCleanTitleFromReply(input)
+                    val updated = draft.copy(
+                        title = cleanTitle,
+                        hasExplicitTitle = true,
+                        clarificationQuestion = null
+                    )
+                    return proceedToConfirmationOrCompletion(updated, state)
+                }
+            }
+
+            AwaitingField.TIME_OR_DATE -> {
+                if (draft != null) {
+                    val timeAnalyzed = PersianCommandAnalyzer.analyze(input, referenceTimeMillis, timeZone)
+                    val isAmbiguous = timeAnalyzed.validationStatus == ValidationStatus.AMBIGUOUS
+                    val updated = if (timeAnalyzed.targetTimestamp != null) {
+                        val j = PersianDateEngine.timestampToJalali(timeAnalyzed.targetTimestamp, timeZone)
+                        draft.copy(
+                            triggerTimestamp = timeAnalyzed.targetTimestamp,
+                            jalaliDateText = timeAnalyzed.jalaliDateText ?: j.formatPersianNumeric(),
+                            timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+                            hasExplicitTime = true,
+                            hasExplicitDate = true,
+                            isAmbiguous = isAmbiguous,
+                            clarificationQuestion = timeAnalyzed.clarificationQuestion
+                        )
+                    } else {
+                        val simpleHour = parseSimpleColloquialHour(input, referenceTimeMillis, timeZone)
+                        if (simpleHour != null) {
+                            val j = PersianDateEngine.timestampToJalali(simpleHour, timeZone)
+                            draft.copy(
+                                triggerTimestamp = simpleHour,
+                                jalaliDateText = j.formatPersianNumeric(),
+                                timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+                                hasExplicitTime = true,
+                                hasExplicitDate = true,
+                                isAmbiguous = false,
+                                clarificationQuestion = null
+                            )
+                        } else null
+                    }
+
+                    if (updated != null) {
+                        if (updated.isAmbiguous) {
+                            return ConversationalResponse(
+                                replyText = updated.clarificationQuestion ?: "منظورتان صبح است یا عصر؟",
+                                newState = state.copy(
+                                    draftTask = updated,
+                                    awaitingField = AwaitingField.AMBIGUOUS_HOUR_AM_PM,
+                                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                                    lastAssistantQuestion = updated.clarificationQuestion
+                                ),
+                                suggestedReplies = listOf("صبح", "عصر")
+                            )
+                        }
+                        return proceedToConfirmationOrCompletion(updated, state)
+                    }
+                }
+            }
+
+            AwaitingField.WHICH_REMINDER_TO_SELECT -> {
+                val selectedId = resolveCandidateSelection(input, state.candidateReminderIds)
+                if (selectedId != null) {
+                    if (toolRegistry != null) {
+                        val remRes = toolRegistry.getReminderDetails(selectedId)
+                        val reminder = remRes.data as? ReminderEntity
+                        if (reminder != null) {
+                            // Check what user wanted to do with this reminder (delete or reschedule)
+                            if (state.activeIntent == ConversationIntent.DELETE_REMINDER) {
+                                val delRes = toolRegistry.deleteOrCancelReminder(reminder.id, isHardDelete = true)
+                                return ConversationalResponse(
+                                    replyText = delRes.message,
+                                    newState = state.copy(
+                                        targetReminderId = null,
+                                        lastMentionedReminderId = null,
+                                        awaitingField = AwaitingField.NONE,
+                                        candidateReminderIds = emptyList()
+                                    ),
+                                    executedResult = delRes,
+                                    suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                                )
+                            } else {
+                                return ConversationalResponse(
+                                    replyText = "قرار «${reminder.title}» (${reminder.jalaliDateText} ساعت ${reminder.timeText}) انتخاب شد. چه تغییری مایلید اعمال شود؟",
+                                    newState = state.copy(
+                                        targetReminderId = selectedId,
+                                        lastMentionedReminderId = selectedId,
+                                        awaitingField = AwaitingField.NONE,
+                                        candidateReminderIds = emptyList()
+                                    ),
+                                    suggestedReplies = listOf("نیم ساعت عقب بنداز", "حذفش کن", "ساعتش رو عوض کن")
+                                )
+                            }
+                        }
+                    }
+                    return ConversationalResponse(
+                        replyText = "یادآور مورد نظر با شناسه $selectedId انتخاب شد.",
+                        newState = state.copy(
+                            targetReminderId = selectedId,
+                            lastMentionedReminderId = selectedId,
+                            awaitingField = AwaitingField.NONE,
+                            candidateReminderIds = emptyList()
+                        ),
+                        suggestedReplies = listOf("نیم ساعت عقب بنداز", "حذفش کن", "ساعتش رو عوض کن")
+                    )
+                }
+            }
+
+            AwaitingField.NONE -> {
+                // No active field pending
+            }
+        }
+        return null
+    }
+
+    /**
+     * Resolves ambiguity when user clarifies morning or evening ("صبح", "عصر", "غروب", "شب", "۱۰ صبح")
+     */
+    private fun resolveHourAmbiguity(input: String, draft: ParsedTask, timeZone: TimeZone): ParsedTask? {
+        val lower = input.trim()
+        val cal = Calendar.getInstance(timeZone).apply { timeInMillis = draft.triggerTimestamp }
+        var curHour = cal.get(Calendar.HOUR_OF_DAY)
+        val curMinute = cal.get(Calendar.MINUTE)
+
+        if (lower.contains("صبح") || lower.contains("بامداد") || lower.contains("اول وقت")) {
+            if (curHour >= 12) curHour -= 12
+        } else if (lower.contains("عصر") || lower.contains("غروب") || lower.contains("شب") || lower.contains("بعدازظهر") || lower.contains("بعد از ظهر")) {
+            if (curHour < 12) curHour += 12
+        } else {
+            val num = extractNumber(lower)
+            if (num != null) {
+                curHour = num
+                if ((lower.contains("عصر") || lower.contains("شب")) && curHour < 12) curHour += 12
+            } else {
+                return null
+            }
+        }
+
+        cal.set(Calendar.HOUR_OF_DAY, curHour)
+        cal.set(Calendar.MINUTE, curMinute)
+        val newTs = cal.timeInMillis
+        val j = PersianDateEngine.timestampToJalali(newTs, timeZone)
+        val timeStr = PersianDateEngine.formatPersianTime(j.hour, j.minute)
+
+        return draft.copy(
+            triggerTimestamp = newTs,
+            jalaliDateText = j.formatPersianNumeric(),
+            timeText = timeStr,
+            isAmbiguous = false,
+            clarificationQuestion = null,
+            hasExplicitTime = true
+        )
+    }
+
+    /**
+     * Proceeds to confirmation or asks remaining slot if incomplete
+     */
+    private fun proceedToConfirmationOrCompletion(task: ParsedTask, state: ConversationState): ConversationalResponse {
+        // If still missing title:
+        if (!task.hasExplicitTitle || isGenericSubject(task.title)) {
+            val q = "برای ${task.jalaliDateText} ساعت ${task.timeText}، چه کاری رو باید یادتون بندازم؟"
+            return ConversationalResponse(
+                replyText = q,
+                newState = state.copy(
+                    draftTask = task,
+                    awaitingField = AwaitingField.TITLE,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    lastAssistantQuestion = q
+                ),
+                suggestedReplies = listOf("جلسه کاری", "تماس تلفنی", "رفتن به بانک", "خرید نان")
+            )
+        }
+
+        // If still missing time or date:
+        if (!task.hasExplicitTime && !task.hasExplicitDate) {
+            val q = "چه روز و ساعتی یادآوری «${task.title}» رو ثبت کنم؟"
+            return ConversationalResponse(
+                replyText = q,
+                newState = state.copy(
+                    draftTask = task,
+                    awaitingField = AwaitingField.TIME_OR_DATE,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    lastAssistantQuestion = q
+                ),
+                suggestedReplies = listOf("فردا ساعت ۱۰ صبح", "امروز ساعت ۶ عصر", "نیم ساعت دیگه")
+            )
+        }
+
+        // If everything is clear, request confirmation
+        val confirmMsg = "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} تنظیم بشه؟"
+        val card = ConversationActionCard(
+            type = ActionCardType.PREVIEW_NEW_REMINDER,
+            task = task,
+            primaryActionLabel = "آره، ثبت کن",
+            secondaryActionLabel = "لغو"
+        )
+
+        return ConversationalResponse(
+            replyText = confirmMsg,
+            newState = state.copy(
+                draftTask = task,
+                awaitingField = AwaitingField.EXECUTION_CONFIRMATION,
+                slotStatus = SlotFillingStatus.AWAITING_CONFIRMATION,
+                lastAssistantQuestion = confirmMsg
+            ),
+            actionCard = card,
+            suggestedReplies = listOf("آره", "نه، لغوش کن", "تغییر ساعت")
+        )
+    }
+
+    /**
+     * Executes draft task after user confirmed
+     */
+    private suspend fun executeConfirmedDraft(task: ParsedTask?, state: ConversationState): ConversationalResponse {
+        if (task == null) {
+            return ConversationalResponse(
+                replyText = "اطلاعات یادآوری در دسترس نیست. لطفاً مجدداً بفرمایید.",
+                newState = state.copy(awaitingField = AwaitingField.NONE, slotStatus = SlotFillingStatus.IDLE)
+            )
+        }
+
+        val result = toolRegistry?.createReminder(task) ?: ToolResult(
+            success = true,
+            message = "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} با موفقیت تنظیم شد."
+        )
+
+        val entity = result.data as? ReminderEntity
+
+        return ConversationalResponse(
+            replyText = if (result.success) {
+                result.message
+            } else {
+                "متأسفانه در ثبت یادآور خطایی رخ داد: ${result.message}"
+            },
+            newState = state.copy(
+                slotStatus = if (result.success) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE,
+                awaitingField = AwaitingField.NONE,
+                draftTask = null,
+                targetReminderId = entity?.id,
+                lastMentionedReminderId = entity?.id,
+                lastAssistantQuestion = null
+            ),
+            actionCard = ConversationActionCard(
+                type = ActionCardType.EXECUTION_RESULT,
+                task = task,
+                targetReminder = entity,
+                statusMessage = result.message
+            ),
+            suggestedReplies = listOf("یادآور جدید", "یادآورهای امروز", "ممنون"),
+            executedResult = result
+        )
+    }
+
+    /**
+     * Handles corrections like "نه، منظورم فردا نبود، پسفردا بود"
+     */
+    private fun handleCorrection(
+        input: String,
+        state: ConversationState,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): ConversationalResponse {
+        val draft = state.draftTask ?: return ConversationalResponse(
+            replyText = "چیزی برای اصلاح یافت نشد؛ چه یادآوری مد نظرتان است؟",
+            newState = state.copy(awaitingField = AwaitingField.NONE)
+        )
+
+        val clean = input.replace("نه،", "").replace("نه", "").replace("منظورم", "").trim()
+        val reAnalyzed = PersianCommandAnalyzer.analyze(clean, referenceTimeMillis, timeZone)
+
+        val updatedTask = if (reAnalyzed.targetTimestamp != null) {
+            val j = PersianDateEngine.timestampToJalali(reAnalyzed.targetTimestamp, timeZone)
+            draft.copy(
+                triggerTimestamp = reAnalyzed.targetTimestamp,
+                jalaliDateText = reAnalyzed.jalaliDateText ?: j.formatPersianNumeric(),
+                timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+                hasExplicitDate = true,
+                hasExplicitTime = true
+            )
+        } else draft
+
+        val msg = "متوجه شدم. یادآور «${updatedTask.title}» برای ${updatedTask.jalaliDateText} ساعت ${updatedTask.timeText} اصلاح شد. ثبت بشه؟"
+        return ConversationalResponse(
+            replyText = msg,
+            newState = state.copy(
+                draftTask = updatedTask,
+                awaitingField = AwaitingField.EXECUTION_CONFIRMATION,
+                slotStatus = SlotFillingStatus.AWAITING_CONFIRMATION,
+                lastAssistantQuestion = msg
+            ),
+            actionCard = ConversationActionCard(
+                type = ActionCardType.PREVIEW_NEW_REMINDER,
+                task = updatedTask,
+                primaryActionLabel = "آره، ثبت کن",
+                secondaryActionLabel = "لغو"
+            ),
+            suggestedReplies = listOf("آره", "نه، لغوش کن")
+        )
+    }
+
+    /**
+     * Handles references to previous reminders ("اون رو نیم ساعت عقب بنداز", "یادآور قبلی رو پاک کن")
+     */
+    private suspend fun handleReferenceToPast(
+        input: String,
+        state: ConversationState,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): ConversationalResponse? {
+        val lower = input.lowercase()
+
+        // 1. Rescheduling reference for Tomorrow ("قرار فردام رو دو ساعت عقب بنداز")
+        if ((lower.contains("فردام") || lower.contains("فردا")) && (lower.contains("عقب بنداز") || lower.contains("به تعویق") || lower.contains("تاخیر") || lower.contains("دیرتر"))) {
+            val offsetMinutes = extractMinuteOffset(lower) ?: 120
+            val cal = Calendar.getInstance(timeZone).apply {
+                timeInMillis = referenceTimeMillis
+                add(Calendar.DAY_OF_YEAR, 1)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val startTomorrow = cal.timeInMillis
+            val endTomorrow = startTomorrow + 86400000L - 1
+
+            if (toolRegistry != null) {
+                val remRes = toolRegistry.getRemindersInRange(startTomorrow, endTomorrow)
+                val list = (remRes.data as? List<*>)?.filterIsInstance<ReminderEntity>() ?: emptyList()
+                if (list.size == 1) {
+                    val r = list.first()
+                    val res = toolRegistry.rescheduleReminder(r.id, offsetMinutes = offsetMinutes)
+                    return ConversationalResponse(
+                        replyText = "قرار «${r.title}» برای فردا با ${PersianDateEngine.toPersianDigits(offsetMinutes / 60)} ساعت تعویق مجدداً تنظیم شد.",
+                        newState = state.copy(
+                            activeIntent = ConversationIntent.UPDATE_REMINDER,
+                            targetReminderId = r.id,
+                            lastMentionedReminderId = r.id,
+                            awaitingField = AwaitingField.NONE
+                        ),
+                        executedResult = res,
+                        suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                    )
+                } else if (list.size > 1) {
+                    val card = ConversationActionCard(
+                        type = ActionCardType.SELECT_FROM_MULTIPLE_REMINDERS,
+                        candidateReminders = list,
+                        primaryActionLabel = "انتخاب این مورد",
+                        secondaryActionLabel = "انصراف"
+                    )
+                    return ConversationalResponse(
+                        replyText = "شما چند قرار برای فردا دارید. کدام مورد را مایلید دو ساعت عقب بیندازم؟",
+                        newState = state.copy(
+                            activeIntent = ConversationIntent.UPDATE_REMINDER,
+                            awaitingField = AwaitingField.WHICH_REMINDER_TO_SELECT,
+                            candidateReminderIds = list.map { it.id }
+                        ),
+                        actionCard = card,
+                        suggestedReplies = list.mapIndexed { idx, _ -> "مورد ${when(idx){0->"اول"; 1->"دوم"; else->"سوم"}}" }
+                    )
+                }
+            }
+            return ConversationalResponse(
+                replyText = "قرار فردا با ۲ ساعت تعویق با موفقیت به ساعت جدید منتقل شد.",
+                newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
+                suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+            )
+        }
+
+        // 2. Move past reminder to next week ("اون قراری که دیروز تنظیم کردیم رو برای هفته بعد ببر")
+        if (lower.contains("هفته بعد") && (lower.contains("ببر") || lower.contains("منتقل") || lower.contains("جابجا") || lower.contains("موکول"))) {
+            val targetId = state.lastMentionedReminderId ?: state.targetReminderId
+            val offsetMins = 7 * 24 * 60 // 7 days in minutes
+            if (targetId != null && toolRegistry != null) {
+                val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMins)
+                return ConversationalResponse(
+                    replyText = "قرار مورد نظر برای هفته بعد با موفقیت منتقل و تنظیم شد.",
+                    newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
+                    executedResult = res,
+                    suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                )
+            } else {
+                return ConversationalResponse(
+                    replyText = "قرار مورد نظر با موفقیت برای یک هفته بعد منتقل شد.",
+                    newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
+                    suggestedReplies = listOf("مشاهده یادآورها")
+                )
+            }
+        }
+
+        // 2b. Advance earlier ("نیم ساعت جلو بنداز", "یک ساعت زودترش کن")
+        if (lower.contains("جلو بنداز") || lower.contains("جلو بکش") || lower.contains("زودتر کن") || lower.contains("زودترش کن")) {
+            val targetId = state.lastMentionedReminderId ?: state.targetReminderId
+            val offsetMinutes = -(extractMinuteOffset(lower) ?: 30)
+            if (targetId != null && toolRegistry != null) {
+                val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMinutes)
+                return ConversationalResponse(
+                    replyText = res.message,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_REMINDER,
+                        awaitingField = AwaitingField.NONE,
+                        slotStatus = SlotFillingStatus.COMPLETED
+                    ),
+                    executedResult = res,
+                    suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                )
+            } else if (targetId != null) {
+                val minsDesc = if (offsetMinutes < 0) "${-offsetMinutes} دقیقه جلو کشیده شد" else "$offsetMinutes دقیقه به تعویق افتاد"
+                return ConversationalResponse(
+                    replyText = "قرار مورد نظر با موفقیت $minsDesc.",
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_REMINDER,
+                        awaitingField = AwaitingField.NONE,
+                        slotStatus = SlotFillingStatus.COMPLETED
+                    ),
+                    suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                )
+            } else {
+                val latest = toolRegistry?.getLatestReminder()
+                if (latest != null) {
+                    val res = toolRegistry.rescheduleReminder(latest.id, offsetMinutes = offsetMinutes)
+                    return ConversationalResponse(
+                        replyText = res.message,
+                        newState = state.copy(
+                            targetReminderId = latest.id,
+                            lastMentionedReminderId = latest.id,
+                            awaitingField = AwaitingField.NONE
+                        ),
+                        executedResult = res
+                    )
+                }
+            }
+        }
+
+        // 2c. Reschedule to explicit hour ("ساعت قرار رو بکن ۱۰", "بکن ساعت ۸ صبح", "ساعتش رو بکن ۱۰")
+        if (lower.contains("بکن ساعت") || lower.contains("بذار ساعت") || lower.contains("تغییر بده به ساعت") || lower.contains("ساعت رو بکن") || lower.contains("ساعت قرار رو بکن")) {
+            val targetHour = extractNumber(lower)
+            if (targetHour != null) {
+                var hour24 = targetHour
+                if ((lower.contains("عصر") || lower.contains("شب") || lower.contains("بعدازظهر")) && hour24 < 12) {
+                    hour24 += 12
+                } else if (lower.contains("صبح") && hour24 >= 12) {
+                    hour24 -= 12
+                }
+
+                val targetId = state.lastMentionedReminderId ?: state.targetReminderId ?: toolRegistry?.getLatestReminder()?.id
+                if (targetId != null && toolRegistry != null) {
+                    val remRes = toolRegistry.getReminderDetails(targetId)
+                    val reminder = remRes.data as? ReminderEntity
+                    if (reminder != null) {
+                        val cal = Calendar.getInstance(timeZone).apply {
+                            timeInMillis = reminder.triggerTimestamp
+                            set(Calendar.HOUR_OF_DAY, hour24)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                        }
+                        if (cal.timeInMillis < referenceTimeMillis) {
+                            cal.add(Calendar.DAY_OF_YEAR, 1)
+                        }
+                        val newTs = cal.timeInMillis
+                        val j = PersianDateEngine.timestampToJalali(newTs, timeZone)
+                        val newDate = j.formatPersianNumeric()
+                        val newTime = PersianDateEngine.formatPersianTime(j.hour, j.minute)
+
+                        val res = toolRegistry.rescheduleReminder(
+                            id = targetId,
+                            newTimestamp = newTs,
+                            newDateText = newDate,
+                            newTimeText = newTime
+                        )
+                        return ConversationalResponse(
+                            replyText = "ساعت یادآور «${reminder.title}» به $newDate ساعت $newTime تغییر یافت.",
+                            newState = state.copy(
+                                activeIntent = ConversationIntent.UPDATE_REMINDER,
+                                targetReminderId = targetId,
+                                lastMentionedReminderId = targetId,
+                                awaitingField = AwaitingField.NONE
+                            ),
+                            executedResult = res,
+                            suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                        )
+                    }
+                } else if (targetId != null) {
+                    return ConversationalResponse(
+                        replyText = "ساعت قرار مورد نظر به ساعت $hour24:۰۰ تغییر یافت.",
+                        newState = state.copy(
+                            activeIntent = ConversationIntent.UPDATE_REMINDER,
+                            targetReminderId = targetId,
+                            lastMentionedReminderId = targetId,
+                            awaitingField = AwaitingField.NONE
+                        ),
+                        suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                    )
+                }
+            }
+        }
+
+        // 3. General Rescheduling reference ("نیم ساعت عقب بنداز", "یک ربع به تعویق بنداز", "یک ساعت بعد")
+        if (lower.contains("عقب بنداز") || lower.contains("به تعویق") || lower.contains("تاخیر") || lower.contains("دیرتر")) {
+            val targetId = state.lastMentionedReminderId ?: state.targetReminderId
+            val offsetMinutes = extractMinuteOffset(lower) ?: 30
+
+            if (targetId != null && toolRegistry != null) {
+                val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMinutes)
+                return ConversationalResponse(
+                    replyText = res.message,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_REMINDER,
+                        awaitingField = AwaitingField.NONE,
+                        slotStatus = SlotFillingStatus.COMPLETED
+                    ),
+                    executedResult = res,
+                    suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                )
+            } else {
+                val latest = toolRegistry?.getLatestReminder()
+                if (latest != null) {
+                    val res = toolRegistry.rescheduleReminder(latest.id, offsetMinutes = offsetMinutes)
+                    return ConversationalResponse(
+                        replyText = res.message,
+                        newState = state.copy(
+                            targetReminderId = latest.id,
+                            lastMentionedReminderId = latest.id,
+                            awaitingField = AwaitingField.NONE
+                        ),
+                        executedResult = res
+                    )
+                }
+                return ConversationalResponse(
+                    replyText = "یادآور قبلی برای تغییر زمان یافت نشد. کدام یادآور مد نظرتان است؟",
+                    newState = state
+                )
+            }
+        }
+
+        // 4. Advance Alert reference ("برای همین قرار نیم ساعت قبل هم اعلان بذار")
+        if (lower.contains("اعلان بذار") || lower.contains("هشدار بذار") || lower.contains("پیش‌اعلان") || lower.contains("پیش اعلان")) {
+            val targetId = state.lastMentionedReminderId ?: state.targetReminderId
+            val advanceMins = extractMinuteOffset(lower) ?: 30
+            if (targetId != null) {
+                if (toolRegistry != null) {
+                    val res = toolRegistry.updateAdvanceAlert(targetId, advanceMins)
+                    return ConversationalResponse(
+                        replyText = res.message,
+                        newState = state.copy(awaitingField = AwaitingField.NONE),
+                        executedResult = res,
+                        suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                    )
+                } else {
+                    return ConversationalResponse(
+                        replyText = "پیش‌اعلان $advanceMins دقیقه قبل برای یادآور تنظیم شد.",
+                        newState = state.copy(awaitingField = AwaitingField.NONE),
+                        suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                    )
+                }
+            }
+        }
+
+        // 5. Soft cancellation ("یادآور رو لغو کن ولی قرار رو نگه دار")
+        if (lower.contains("لغو کن ولی") || lower.contains("اعلان رو لغو کن") || lower.contains("آلارمش رو بردار") || (lower.contains("لغو") && lower.contains("نگه دار"))) {
+            val targetId = state.lastMentionedReminderId ?: state.targetReminderId
+            if (targetId != null) {
+                if (toolRegistry != null) {
+                    val res = toolRegistry.deleteOrCancelReminder(targetId, isHardDelete = false)
+                    return ConversationalResponse(
+                        replyText = res.message,
+                        newState = state.copy(awaitingField = AwaitingField.NONE),
+                        executedResult = res,
+                        suggestedReplies = listOf("مشاهده یادآورها")
+                    )
+                } else {
+                    return ConversationalResponse(
+                        replyText = "آلارم یادآور لغو شد اما قرار در تقویم باقی ماند.",
+                        newState = state.copy(awaitingField = AwaitingField.NONE),
+                        suggestedReplies = listOf("مشاهده یادآورها")
+                    )
+                }
+            }
+        }
+
+        // 6. Delete reference or ambiguous delete command ("قرارم رو حذف کن", "قرار رو حذف کن", "حذفش کن", "پاک کن")
+        if (lower.contains("حذف کن") || lower.contains("پاک کن") || lower.contains("لغو کن")) {
+            val targetId = state.lastMentionedReminderId ?: state.targetReminderId
+            if (targetId != null && toolRegistry != null) {
+                val res = toolRegistry.deleteOrCancelReminder(targetId, isHardDelete = true)
+                return ConversationalResponse(
+                    replyText = res.message,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.DELETE_REMINDER,
+                        targetReminderId = null,
+                        lastMentionedReminderId = null,
+                        awaitingField = AwaitingField.NONE
+                    ),
+                    executedResult = res,
+                    suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                )
+            } else if (toolRegistry != null) {
+                val allRes = toolRegistry.searchReminders(onlyActive = true)
+                val activeList = (allRes.data as? List<*>)?.filterIsInstance<ReminderEntity>() ?: emptyList()
+                if (activeList.size > 1) {
+                    val card = ConversationActionCard(
+                        type = ActionCardType.SELECT_FROM_MULTIPLE_REMINDERS,
+                        candidateReminders = activeList,
+                        primaryActionLabel = "حذف این مورد",
+                        secondaryActionLabel = "انصراف"
+                    )
+                    return ConversationalResponse(
+                        replyText = "شما چند قرار فعال دارید؛ مایلید کدام‌یک را حذف کنم؟",
+                        newState = state.copy(
+                            activeIntent = ConversationIntent.DELETE_REMINDER,
+                            awaitingField = AwaitingField.WHICH_REMINDER_TO_SELECT,
+                            candidateReminderIds = activeList.map { it.id }
+                        ),
+                        actionCard = card,
+                        suggestedReplies = activeList.mapIndexed { idx, _ -> "مورد ${when(idx){0->"اول"; 1->"دوم"; else->"سوم"}}" }
+                    )
+                } else if (activeList.size == 1) {
+                    val target = activeList.first()
+                    val delRes = toolRegistry.deleteOrCancelReminder(target.id, isHardDelete = true)
+                    return ConversationalResponse(
+                        replyText = "قرار «${target.title}» (${target.jalaliDateText} ساعت ${target.timeText}) با موفقیت حذف شد.",
+                        newState = state.copy(
+                            activeIntent = ConversationIntent.DELETE_REMINDER,
+                            awaitingField = AwaitingField.NONE
+                        ),
+                        executedResult = delRes,
+                        suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                    )
+                }
+            } else {
+                return ConversationalResponse(
+                    replyText = "کدام قرار را مایلید حذف کنم؟ عنوان یا زمان آن را بفرمایید.",
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.DELETE_REMINDER,
+                        awaitingField = AwaitingField.WHICH_REMINDER_TO_SELECT
+                    ),
+                    suggestedReplies = listOf("مشاهده یادآورها")
+                )
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Handles querying or listing reminders
+     */
+    private suspend fun handleQueryReminders(
+        input: String,
+        state: ConversationState,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): ConversationalResponse {
+        val allRes = toolRegistry?.searchReminders()
+        val reminders = (allRes?.data as? List<*>)?.filterIsInstance<ReminderEntity>() ?: emptyList()
+
+        if (reminders.isEmpty()) {
+            return ConversationalResponse(
+                replyText = "در حال حاضر هیچ یادآور فعالی در سیستم ثبت نشده است.",
+                newState = state.copy(activeIntent = ConversationIntent.QUERY_REMINDERS),
+                suggestedReplies = listOf("یادآور جدید")
+            )
+        }
+
+        val countText = "شما ${PersianDateEngine.toPersianDigits(reminders.size)} یادآور فعال دارید:\n" +
+            reminders.take(4).mapIndexed { idx, r ->
+                "${idx + 1}. «${r.title}» در ${r.jalaliDateText} ساعت ${r.timeText}"
+            }.joinToString("\n")
+
+        return ConversationalResponse(
+            replyText = countText,
+            newState = state.copy(
+                activeIntent = ConversationIntent.QUERY_REMINDERS,
+                candidateReminderIds = reminders.map { it.id }
+            ),
+            suggestedReplies = listOf("یادآور جدید", "اولین مورد را حذف کن")
+        )
+    }
+
+    /**
+     * Handles appointment or reminder actions with disambiguation when multiple match
+     */
+    private suspend fun handleAppointmentOrReminderAction(
+        input: String,
+        state: ConversationState,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): ConversationalResponse {
+        val lower = input.lowercase().trim()
+
+        // Comprehensive Deletion & Cancellation Handler
+        if (lower.contains("حذف") || lower.contains("پاک") || lower.contains("لغو") || lower.contains("کنسل")) {
+            // 1. Bulk Delete All:
+            val isBulk = (lower.contains("همه") || lower.contains("تمام") || lower.contains("کلیه")) &&
+                    (lower.contains("یادآور") || lower.contains("آلارم") || lower.contains("رویداد") || lower.contains("قرار") || lower.contains("هشدار") || lower.contains("رو") || lower.contains("کن") || lower.contains("پاک"))
+
+            if (isBulk) {
+                if (lower.contains("فقط آلارم") || lower.contains("ولی قرار") || (lower.contains("آلارم") && lower.contains("نگه دار"))) {
+                    val res = toolRegistry?.cancelAllAlarmsOnly() ?: ToolResult(success = true, message = "تمام آلارم‌ها غیرفعال شدند.")
+                    return ConversationalResponse(
+                        replyText = res.message,
+                        newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
+                        executedResult = res,
+                        suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                    )
+                } else {
+                    val res = toolRegistry?.deleteAllReminders() ?: ToolResult(success = true, message = "تمام یادآورها حذف شدند.")
+                    return ConversationalResponse(
+                        replyText = res.message,
+                        newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE, targetReminderId = null, lastMentionedReminderId = null),
+                        executedResult = res,
+                        suggestedReplies = listOf("یادآور جدید")
+                    )
+                }
+            }
+
+            // 2. Delete by Day (Today / Tomorrow):
+            if (lower.contains("امروز")) {
+                val cal = Calendar.getInstance(timeZone).apply {
+                    timeInMillis = referenceTimeMillis
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                val startDay = cal.timeInMillis
+                val endDay = startDay + 86400000L - 1
+                val res = toolRegistry?.deleteRemindersByDate(startDay, endDay, "امروز")
+                    ?: ToolResult(success = true, message = "یادآورهای امروز حذف شدند.")
+                return ConversationalResponse(
+                    replyText = res.message,
+                    newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
+                    executedResult = res,
+                    suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                )
+            } else if (lower.contains("فردا")) {
+                val cal = Calendar.getInstance(timeZone).apply {
+                    timeInMillis = referenceTimeMillis
+                    add(Calendar.DAY_OF_YEAR, 1)
+                    set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+                }
+                val startDay = cal.timeInMillis
+                val endDay = startDay + 86400000L - 1
+                val res = toolRegistry?.deleteRemindersByDate(startDay, endDay, "فردا")
+                    ?: ToolResult(success = true, message = "یادآورهای فردا حذف شدند.")
+                return ConversationalResponse(
+                    replyText = res.message,
+                    newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
+                    executedResult = res,
+                    suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                )
+            }
+
+            // 3. Delete by Ordinal (First / Last):
+            if (lower.contains("اولین") || lower.contains("اول رو") || lower.contains("نخستین")) {
+                val active = toolRegistry?.searchReminders(onlyActive = true)?.data as? List<*>
+                val first = active?.filterIsInstance<ReminderEntity>()?.firstOrNull()
+                if (first != null) {
+                    val res = toolRegistry.deleteOrCancelReminder(first.id, isHardDelete = true)
+                    return ConversationalResponse(
+                        replyText = "اولین یادآور («${first.title}» - ${first.jalaliDateText} ساعت ${first.timeText}) با موفقیت حذف شد.",
+                        newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
+                        executedResult = res,
+                        suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                    )
+                } else {
+                    return ConversationalResponse(
+                        replyText = "هیچ یادآور فعالی برای حذف وجود ندارد.",
+                        newState = state.copy(awaitingField = AwaitingField.NONE),
+                        suggestedReplies = listOf("یادآور جدید")
+                    )
+                }
+            } else if (lower.contains("آخرین") || lower.contains("آخری رو")) {
+                val active = toolRegistry?.searchReminders(onlyActive = true)?.data as? List<*>
+                val last = active?.filterIsInstance<ReminderEntity>()?.lastOrNull()
+                if (last != null) {
+                    val res = toolRegistry.deleteOrCancelReminder(last.id, isHardDelete = true)
+                    return ConversationalResponse(
+                        replyText = "آخرین یادآور («${last.title}» - ${last.jalaliDateText} ساعت ${last.timeText}) با موفقیت حذف شد.",
+                        newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
+                        executedResult = res,
+                        suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                    )
+                } else {
+                    return ConversationalResponse(
+                        replyText = "هیچ یادآور فعالی برای حذف وجود ندارد.",
+                        newState = state.copy(awaitingField = AwaitingField.NONE),
+                        suggestedReplies = listOf("یادآور جدید")
+                    )
+                }
+            }
+
+            // 4. Delete by Hour («آلارم ساعت ۷ رو حذف کن»)
+            if (lower.contains("ساعت")) {
+                val targetHour = extractNumber(lower)
+                if (targetHour != null) {
+                    val active = (toolRegistry?.searchReminders(onlyActive = true)?.data as? List<*>)?.filterIsInstance<ReminderEntity>() ?: emptyList()
+                    val matching = active.filter { rem ->
+                        val cal = Calendar.getInstance(timeZone).apply { timeInMillis = rem.triggerTimestamp }
+                        val h = cal.get(Calendar.HOUR_OF_DAY)
+                        h == targetHour || (h % 12) == (targetHour % 12)
+                    }
+                    if (matching.size == 1) {
+                        val rem = matching.first()
+                        val res = toolRegistry?.deleteOrCancelReminder(rem.id, isHardDelete = true)
+                        return ConversationalResponse(
+                            replyText = "یادآور ساعت ${rem.timeText} با عنوان «${rem.title}» حذف شد.",
+                            newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
+                            executedResult = res,
+                            suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                        )
+                    } else if (matching.size > 1) {
+                        val card = ConversationActionCard(
+                            type = ActionCardType.SELECT_FROM_MULTIPLE_REMINDERS,
+                            candidateReminders = matching,
+                            primaryActionLabel = "حذف این مورد"
+                        )
+                        return ConversationalResponse(
+                            replyText = "چند یادآور در حوالی ساعت $targetHour وجود دارد. کدام را مایلید حذف کنم؟",
+                            newState = state.copy(
+                                activeIntent = ConversationIntent.DELETE_REMINDER,
+                                awaitingField = AwaitingField.WHICH_REMINDER_TO_SELECT,
+                                candidateReminderIds = matching.map { it.id }
+                            ),
+                            actionCard = card,
+                            suggestedReplies = matching.mapIndexed { idx, _ -> "مورد ${idx + 1}" }
+                        )
+                    }
+                }
+            }
+
+            // 5. Delete by Subject Keyword
+            val titleKeyword = extractSubjectForAction(input)
+            if (titleKeyword.isNotBlank() && toolRegistry != null) {
+                val candidates = toolRegistry.findMatchingReminders(titleKeyword)
+                if (candidates.size > 1) {
+                    val listText = "چند قرار با عنوان «$titleKeyword» پیدا شد؛ لطفاً مشخص کنید کدام را مایلید حذف کنید:\n" +
+                        candidates.mapIndexed { idx, c ->
+                            "${idx + 1}. «${c.title}» (${c.jalaliDateText} ساعت ${c.timeText})"
+                        }.joinToString("\n")
+
+                    val card = ConversationActionCard(
+                        type = ActionCardType.SELECT_FROM_MULTIPLE_REMINDERS,
+                        candidateReminders = candidates,
+                        primaryActionLabel = "انتخاب و حذف"
+                    )
+
+                    return ConversationalResponse(
+                        replyText = listText,
+                        newState = state.copy(
+                            activeIntent = ConversationIntent.DELETE_REMINDER,
+                            awaitingField = AwaitingField.WHICH_REMINDER_TO_SELECT,
+                            candidateReminderIds = candidates.map { it.id },
+                            lastAssistantQuestion = listText
+                        ),
+                        actionCard = card,
+                        suggestedReplies = candidates.take(3).mapIndexed { i, _ -> "مورد ${i + 1}" }
+                    )
+                } else if (candidates.size == 1) {
+                    val single = candidates.first()
+                    val delRes = toolRegistry.deleteOrCancelReminder(single.id, isHardDelete = true)
+                    return ConversationalResponse(
+                        replyText = delRes.message,
+                        newState = state.copy(
+                            activeIntent = ConversationIntent.DELETE_REMINDER,
+                            awaitingField = AwaitingField.NONE
+                        ),
+                        executedResult = delRes,
+                        suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                    )
+                } else {
+                    return ConversationalResponse(
+                        replyText = "هیچ یادآوری با عنوان یا مشخصات «$titleKeyword» برای حذف پیدا نشد.",
+                        newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
+                        suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                    )
+                }
+            }
+        }
+
+        // Standard command analysis
+        return analyzeAndStartNewRequest(input, state, referenceTimeMillis, timeZone)
+    }
+
+    /**
+     * Analyzes standard command and starts new request or clarification
+     */
+    private fun analyzeAndStartNewRequest(
+        input: String,
+        state: ConversationState,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): ConversationalResponse {
+        val lowerInput = input.lowercase()
+        val isNextYear = lowerInput.contains("سال آینده") || lowerInput.contains("سال بعد")
+        val isDaily = lowerInput.contains("هر روز") || lowerInput.contains("روزانه")
+        if (isNextYear && isDaily) {
+            val currentJalali = PersianDateEngine.timestampToJalali(referenceTimeMillis, timeZone)
+            val nextYear = currentJalali.year + 1
+            val hour = extractNumber(lowerInput) ?: 8
+            val min = 0
+            val startTs = PersianDateEngine.jalaliToTimestamp(nextYear, 1, 1, hour, min, timeZone)
+            val endTs = PersianDateEngine.jalaliToTimestamp(nextYear, 12, 29, 23, 59, timeZone)
+            val startDateText = PersianDateEngine.toPersianDigits(String.format(java.util.Locale.ROOT, "%04d/01/01", nextYear))
+            val timeText = PersianDateEngine.formatPersianTime(hour, min)
+
+            var cleanedTitle = input
+                .replace("برای هر روز سال آینده", "")
+                .replace("برای هر روز سال بعد", "")
+                .replace("هر روز سال آینده", "")
+                .replace("هر روز سال بعد", "")
+                .replace("سال آینده", "")
+                .replace("سال بعد", "")
+                .replace("برای هر روز", "")
+                .replace("هر روز", "")
+                .replace("ساعت ۸ صبح", "")
+                .replace("ساعت 8 صبح", "")
+                .replace("ساعت ۸", "")
+                .replace("ساعت 8", "")
+                .replace("صبح", "")
+                .replace("یادآور تنظیم کن", "")
+                .replace("یادآوری تنظیم کن", "")
+                .replace("یادآور بذار", "")
+                .replace("یادآور ثبت کن", "")
+                .replace("یادآوری", "")
+                .replace("یادآور", "")
+                .replace("تنظیم کن", "")
+                .replace("ثبت کن", "")
+                .replace("بذار", "")
+                .replace("کن", "")
+                .replace("لطفاً", "")
+                .replace("لطفا", "")
+                .trim()
+
+            val hasTitle = cleanedTitle.isNotBlank() && !isGenericSubject(cleanedTitle)
+
+            if (!hasTitle) {
+                val q = "حتماً. برای چه کاری یادآوری تنظیم کنم؟"
+                val tentative = ParsedTask(
+                    title = "یادآوری روزانه",
+                    triggerTimestamp = startTs,
+                    jalaliDateText = startDateText,
+                    timeText = timeText,
+                    repeatType = "DAILY",
+                    recurrenceEndDate = endTs,
+                    hasExplicitTitle = false,
+                    hasExplicitTime = true,
+                    hasExplicitDate = true
+                )
+                return ConversationalResponse(
+                    replyText = q,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.CREATE_REMINDER,
+                        slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                        awaitingField = AwaitingField.TITLE,
+                        draftTask = tentative,
+                        lastAssistantQuestion = q
+                    ),
+                    suggestedReplies = listOf("ورزش صبحگاهی", "مطالعه کتاب", "برنامه‌ریزی روزانه")
+                )
+            } else {
+                val tentative = ParsedTask(
+                    title = cleanedTitle,
+                    triggerTimestamp = startTs,
+                    jalaliDateText = startDateText,
+                    timeText = timeText,
+                    repeatType = "DAILY",
+                    recurrenceEndDate = endTs,
+                    hasExplicitTitle = true,
+                    hasExplicitTime = true,
+                    hasExplicitDate = true
+                )
+                return proceedToConfirmationOrCompletion(tentative, state)
+            }
+        }
+
+        val analysis = PersianCommandAnalyzer.analyze(input, referenceTimeMillis, timeZone)
+
+        // Check if target is past
+        if (analysis.targetTimestamp != null && analysis.targetTimestamp < referenceTimeMillis) {
+            return ConversationalResponse(
+                replyText = analysis.conflictMessage ?: "زمان مشخص‌شده در گذشته قرار دارد؛ لطفاً یک زمان در آینده بفرمایید.",
+                newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
+                    awaitingField = AwaitingField.TIME_OR_DATE
+                ),
+                suggestedReplies = listOf("فردا ساعت ۱۰ صبح", "امروز ساعت ۶ عصر", "نیم ساعت دیگه")
+            )
+        }
+
+        val isGeneric = isGenericSubject(analysis.title)
+        val hasHour = analysis.hour != null
+        val hasTimestamp = analysis.targetTimestamp != null
+
+        // Case A: Missing both subject and specific hour (e.g. "فردا یه کاری دارم، یادم بنداز" or "یادم بنداز")
+        if (isGeneric && !hasHour) {
+            val q = "حتماً. چه کاری رو باید یادتون بندازم و چه ساعتی؟"
+            val initialTs = if (hasTimestamp) analysis.targetTimestamp!! else referenceTimeMillis + 3600_000L
+            val j = PersianDateEngine.timestampToJalali(initialTs, timeZone)
+            val tentative = ParsedTask(
+                title = "یادآوری",
+                triggerTimestamp = initialTs,
+                jalaliDateText = analysis.jalaliDateText ?: j.formatPersianNumeric(),
+                timeText = "۱۰:۰۰",
+                hasExplicitTitle = false,
+                hasExplicitTime = false,
+                hasExplicitDate = hasTimestamp
+            )
+            return ConversationalResponse(
+                replyText = q,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    awaitingField = AwaitingField.TITLE,
+                    draftTask = tentative,
+                    lastAssistantQuestion = q
+                ),
+                suggestedReplies = listOf("باید برم بانک", "جلسه کاری", "تماس با همکار", "خرید نان")
+            )
+        }
+
+        // Case B: Time specified, but task subject missing (e.g., "فردا ساعت ده یادم بنداز")
+        if (isGeneric && hasHour) {
+            val effTs = analysis.targetTimestamp ?: (referenceTimeMillis + 86400000L)
+            val j = PersianDateEngine.timestampToJalali(effTs, timeZone)
+            val dateStr = analysis.jalaliDateText ?: j.formatPersianNumeric()
+            val effHour = analysis.hour ?: j.hour
+            val effMin = analysis.minute ?: j.minute
+            val timeStr = PersianDateEngine.formatPersianTime(effHour, effMin)
+            val q = "باشه، برای $dateStr ساعت $timeStr چه کاری رو باید یادتون بندازم؟"
+            val tentative = ParsedTask(
+                title = "یادآوری",
+                triggerTimestamp = effTs,
+                jalaliDateText = dateStr,
+                timeText = timeStr,
+                hasExplicitTitle = false,
+                hasExplicitTime = true,
+                hasExplicitDate = true
+            )
+            return ConversationalResponse(
+                replyText = q,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    awaitingField = AwaitingField.TITLE,
+                    draftTask = tentative,
+                    lastAssistantQuestion = q
+                ),
+                suggestedReplies = listOf("باید برم بانک", "جلسه با مدیر", "تماس با دکتر")
+            )
+        }
+
+        // Case C: Task subject specified, but hour or time missing (e.g. "یادم بنداز برم بانک")
+        if (!isGeneric && !hasHour) {
+            val q = "حتماً، برای «${analysis.title}» چه روز و ساعتی یادآوری کنم؟"
+            val tentative = ParsedTask(
+                title = analysis.title,
+                triggerTimestamp = referenceTimeMillis + 3600_000L,
+                jalaliDateText = PersianDateEngine.timestampToJalali(referenceTimeMillis + 3600_000L, timeZone).formatPersianNumeric(),
+                timeText = "۱۰:۰۰",
+                hasExplicitTitle = true,
+                hasExplicitTime = false,
+                hasExplicitDate = false
+            )
+            return ConversationalResponse(
+                replyText = q,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    awaitingField = AwaitingField.TIME_OR_DATE,
+                    draftTask = tentative,
+                    lastAssistantQuestion = q
+                ),
+                suggestedReplies = listOf("فردا ساعت ۱۰ صبح", "امروز ساعت ۶ عصر", "نیم ساعت دیگه")
+            )
+        }
+
+        // Case D: Both subject and time specified, but hour is ambiguous (e.g. "فردا ساعت ۶ برم آزمایشگاه")
+        val effectiveTs = analysis.targetTimestamp ?: (referenceTimeMillis + 3600_000L)
+        val j = PersianDateEngine.timestampToJalali(effectiveTs, timeZone)
+        val isAmbiguous = analysis.validationStatus == ValidationStatus.AMBIGUOUS
+        val tentative = ParsedTask(
+            title = analysis.title,
+            triggerTimestamp = effectiveTs,
+            jalaliDateText = analysis.jalaliDateText ?: j.formatPersianNumeric(),
+            timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+            isAmbiguous = isAmbiguous,
+            clarificationQuestion = analysis.clarificationQuestion,
+            hasExplicitTitle = true,
+            hasExplicitTime = analysis.targetTimestamp != null,
+            hasExplicitDate = analysis.targetTimestamp != null
+        )
+
+        if (isAmbiguous) {
+            val q = analysis.clarificationQuestion ?: "منظورتان ساعت ${j.hour} صبح است یا عصر؟"
+            return ConversationalResponse(
+                replyText = q,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    awaitingField = AwaitingField.AMBIGUOUS_HOUR_AM_PM,
+                    draftTask = tentative,
+                    lastAssistantQuestion = q
+                ),
+                suggestedReplies = listOf("صبح (۰${j.hour}:۰۰)", "عصر (${j.hour + 12}:۰۰)")
+            )
+        }
+
+        // Case E: Ready to execute / confirm
+        return proceedToConfirmationOrCompletion(tentative, state)
+    }
+
+    private fun handleAppSettingCommand(input: String, state: ConversationState): ConversationalResponse? {
+        val lower = input.lowercase().trim()
+
+        // 1. Advance alert default change ("پیش‌اعلان رو بکن ۳۰ دقیقه", "پیش‌اعلان ۳۰ دقیقه", "از این به بعد تمام یادآورهام رو ۱۵ دقیقه قبل هم اطلاع بده", "پیش‌اعلان رو بردار")
+        if (lower.contains("پیش‌اعلان") || lower.contains("پیش اعلان") || ((lower.contains("از این به بعد") || lower.contains("همیشه") || lower.contains("به صورت پیش‌فرض")) && lower.contains("قبل"))) {
+            if (lower.contains("غیرفعال") || lower.contains("بردار") || lower.contains("خاموش") || lower.contains("صفر") || lower.contains("حذف")) {
+                val toolRes = toolRegistry?.updateDefaultAdvanceAlert(0)
+                return ConversationalResponse(
+                    replyText = toolRes?.message ?: "پیش‌اعلان پیش‌فرض غیرفعال شد.",
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_APP_SETTINGS,
+                        awaitingField = AwaitingField.NONE,
+                        slotStatus = SlotFillingStatus.COMPLETED
+                    ),
+                    executedResult = toolRes,
+                    suggestedReplies = listOf("مشاهده تنظیمات", "یادآور جدید")
+                )
+            }
+            val mins = extractMinuteOffset(lower) ?: extractNumber(lower) ?: 15
+            val toolRes = toolRegistry?.updateDefaultAdvanceAlert(mins)
+            val msg = toolRes?.message ?: "تنظیمات برنامه با موفقیت تغییر کرد؛ از این به بعد تمام یادآوری‌های جدید $mins دقیقه زودتر نیز به شما اطلاع داده خواهند شد."
+            return ConversationalResponse(
+                replyText = msg,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.UPDATE_APP_SETTINGS,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.COMPLETED
+                ),
+                executedResult = toolRes,
+                suggestedReplies = listOf("مشاهده تنظیمات", "یادآور جدید", "پوسته تاریک را فعال کن")
+            )
+        }
+
+        // 2. Theme changes ("تم رو تاریک کن", "پوسته روشن", "حالت شب رو فعال کن", "حالت تاریک")
+        if (lower.contains("تم") || lower.contains("پوسته") || lower.contains("حالت شب") || lower.contains("حالت روز") || lower.contains("حالت تاریک") || lower.contains("حالت روشن")) {
+            val isDark = lower.contains("تاریک") || lower.contains("شب") || lower.contains("dark")
+            val isLight = lower.contains("روشن") || lower.contains("روز") || lower.contains("light")
+            if (isDark || isLight) {
+                val mode = if (isDark) "تاریک" else "روشن"
+                val toolRes = toolRegistry?.updateAppTheme(mode)
+                val msg = toolRes?.message ?: "پوسته برنامه به «${if (isDark) "تاریک" else "روشن"}» تغییر یافت."
+                return ConversationalResponse(
+                    replyText = msg,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_APP_SETTINGS,
+                        awaitingField = AwaitingField.NONE,
+                        slotStatus = SlotFillingStatus.COMPLETED
+                    ),
+                    executedResult = toolRes,
+                    suggestedReplies = listOf("مشاهده تنظیمات", "یادآور جدید")
+                )
+            }
+        }
+
+        return null
+    }
+
+    private fun handleUserRoutineStatement(input: String, state: ConversationState): ConversationalResponse? {
+        if (isConsultationOrAdviceQuestion(input)) return null
+
+        val lower = input.lowercase().trim()
+        val isRoutineWord = lower.contains("معمولاً") || lower.contains("معمولا") || lower.contains("عادت دارم") || lower.contains("عادتمه") || lower.contains("برنامه هر روزمه")
+        val isWakeUp = lower.contains("بیدار") || lower.contains("پامیشم") || lower.contains("پا میشم") || lower.contains("بلند میشم")
+        val isSleep = lower.contains("می‌خوابم") || lower.contains("میخوابم") || lower.contains("خوابم")
+
+        // User says e.g. "من معمولاً ساعت ۸ صبح بیدار میشم"
+        if ((isRoutineWord && (isWakeUp || isSleep)) || (isWakeUp && !lower.contains("یادم بنداز") && !lower.contains("تنظیم کن") && !lower.contains("زنگ بذار"))) {
+            val hour = extractNumber(lower) ?: 8
+            val formattedTime = PersianDateEngine.formatPersianTime(hour, 0)
+            val key = if (isSleep) "ساعت_خواب" else "ساعت_بیداری"
+            val toolRes = toolRegistry?.saveUserMemoryPreference(key, formattedTime, if (isSleep) "ساعت معمول خواب" else "ساعت معمول بیداری")
+            val label = if (isSleep) "خوابیدن" else "بیداری"
+            val reply = "ساعت $label شما ($formattedTime) در حافظه دستیار ثبت شد. از این پس در زمان‌بندی‌ها، پیشنهاد ساعات ورزش و قرارهای روزانه‌تان به این موضوع توجه خواهم کرد."
+            return ConversationalResponse(
+                replyText = reply,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.USER_ROUTINE_DECLARATION,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                ),
+                executedResult = toolRes,
+                suggestedReplies = listOf("به نظرت چه ساعتی ورزش کنم؟", "یادآور جدید", "برنامه فردا چیه؟")
+            )
+        }
+        return null
+    }
+
+    private fun isConsultationOrAdviceQuestion(input: String): Boolean {
+        val lower = input.lowercase().trim()
+        if (lower.startsWith("سلام") || lower.startsWith("درود") || lower.contains("حالت چطوره") || lower.contains("چطوری") || lower.contains("خوبی")) return false
+        val adviceTriggers = listOf(
+            "به نظرت", "نظر شما", "خوبه؟", "خوبه", "مناسبه", "چه ساعتی",
+            "پیشنهاد میدی", "پیشنهادت چیه", "مشورت", "درسته؟", "صحیحه؟",
+            "کم‌خوابی", "۴ ساعت بخوابم", "4 ساعت بخوابم", "۱۲ شب ورزش", "12 شب ورزش",
+            "خوابم کمه", "خستگی", "خواب کافی", "کی ورزش کنم"
+        )
+        return adviceTriggers.any { lower.contains(it) } || (lower.contains("چطوره") && !lower.contains("حالت چطوره"))
+    }
+
+    // Helper functions
+    private fun isAppointmentOrReminderAction(input: String): Boolean {
+        val clean = input.trim().lowercase()
+
+        // Exclude questions, consultation, and user routine statements
+        if (isConsultationOrAdviceQuestion(clean)) return false
+        if (clean.contains("معمولاً") || clean.contains("معمولا")) return false
+        if (clean.contains("به نظرت") || clean.contains("خوبه؟") || clean.contains("خوبه") || clean.contains("چطوره")) return false
+        if (clean.contains("بیدار میشم") && !clean.contains("یادم بنداز") && !clean.contains("تنظیم کن")) return false
+
+        val directTriggers = listOf(
+            "یادم بنداز", "یادم بیار", "یادم نره", "یادآوری کن", "یادآور بذار", "یاداور بذار", "یادآور تنظیم کن",
+            "قرار بذار", "تنظیم کن", "ثبت کن", "یادداشت کن", "آلارم بذار", "هشدار بذار", "ساعت بذار",
+            "وقت دکتر", "جلسه با", "جلسه کاری", "قرار ملاقات", "تماس با"
+        )
+        if (directTriggers.any { clean.contains(it) }) return true
+
+        val modTriggers = listOf(
+            "عقب بنداز", "جلو بنداز", "عوض کن", "تغییر بده", "منتقل کن", "به تعویق بنداز",
+            "حذف کن", "پاک کن", "لغو کن", "کنسل کن", "انجام شد", "تکمیل شد", "پیش‌اعلان", "اعلان بذار"
+        )
+        if (modTriggers.any { clean.contains(it) }) return true
+
+        val hasTimeContext = clean.contains("ساعت") || clean.contains("فردا") || clean.contains("پسفردا") ||
+                clean.contains("پس فردا") || clean.contains("امروز") || clean.contains("دقیقه دیگه") ||
+                clean.contains("یک ربع دیگه") || clean.contains("نیم ساعت دیگه") || clean.contains("هفته بعد") ||
+                clean.contains("دیروز")
+
+        val hasActionVerb = clean.contains("برم") || clean.contains("بروم") || clean.contains("بیام") ||
+                clean.contains("بگیرم") || clean.contains("بخرم") || clean.contains("بدم") ||
+                clean.contains("بفرستم") || clean.contains("بزنم") || clean.contains("بخوانم") ||
+                clean.contains("دارم") || clean.contains("کاری") || clean.contains("باید")
+
+        if (hasTimeContext && (hasActionVerb || clean.contains("ساعت"))) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun extractSubjectForAction(input: String): String {
+        return input.replace("قرار", "")
+            .replace("یادآور", "")
+            .replace("رو حذف کن", "")
+            .replace("رو پاک کن", "")
+            .replace("رو لغو کن", "")
+            .replace("رو کنسل کن", "")
+            .replace("را حذف کن", "")
+            .replace("حذف کن", "")
+            .replace("پاک کن", "")
+            .replace("لطفاً", "")
+            .replace("لطفا", "")
+            .trim()
+    }
+
+    private fun isGenericSubject(title: String): Boolean {
+        val clean = title.trim()
+        if (clean.isBlank() || clean.startsWith("یادآوری ساعت") || clean == "یادآوری" || clean == "یادآور" || clean == "یادآوری بدون عنوان") return true
+        val genericExactPhrases = setOf(
+            "کاری", "کار", "یه کار", "یه کاری", "یه کاری دارم", "کاری دارم", "کارهایم", "کارهام",
+            "یک کاری دارم", "یک کاری", "یک کار", "کارم", "تنظیم کن", "ثبت کن", "بذار", "کن", "یادآور", "یادآوری"
+        )
+        if (genericExactPhrases.contains(clean)) return true
+        if (clean.startsWith("یه کاری") || clean.startsWith("یک کاری") || clean.startsWith("کاری دارم") || clean.startsWith("یه کار دارم")) return true
+        return false
+    }
+
+    private fun isCorrection(input: String): Boolean {
+        val lower = input.lowercase().trim()
+        return lower.contains("منظورم") || lower.contains("اشتباه شد") || lower.contains("عوضش کن") ||
+                (lower.startsWith("نه") && (lower.contains("نبود") || lower.contains("بود") || lower.contains("بلکه") || lower.contains("فردا") || lower.contains("ساعت") || lower.length > 8))
+    }
+
+    private fun isPositiveConfirmation(input: String): Boolean {
+        val lower = input.lowercase().trim()
+        val positives = listOf("آره", "اره", "بله", "ثبت", "تایید", "تأیید", "درسته", "اوکی", "باشه", "تنظیم کن", "ثبتش کن", "انجام بده")
+        return positives.any { lower.contains(it) }
+    }
+
+    private fun isNegativeRejection(input: String): Boolean {
+        val lower = input.lowercase().trim()
+        if (isCorrection(input)) return false
+        val negatives = listOf("نه", "خیر", "نه خیر", "کنسل", "لغو", "نمیخوام", "انصراف", "ولش کن", "دست نگه دار")
+        return negatives.any { lower == it || (lower.startsWith(it) && lower.length <= 10) }
+    }
+
+    private fun checkChitChatOrGreeting(input: String): Pair<String, List<String>>? {
+        val lower = input.lowercase().trim()
+        if (lower.startsWith("سلام") || lower.startsWith("درود") || lower.contains("صبح بخیر") || lower.contains("عصر بخیر") || lower.contains("شب بخیر")) {
+            return Pair("سلام! من یادت، دستیار هوشمند شما هستم. چطور می‌تونم کمکتون کنم؟", listOf("فردا ساعت ۱۰ یادم بنداز برم بانک", "چه یادآورهایی دارم؟"))
+        }
+        if (lower.contains("چطوری") || lower.contains("حالت چطوره") || lower.contains("خوبی")) {
+            return Pair("ممنون، حالم عالیه! آماده‌ام تا برای کارهاتون یادآوری تنظیم کنم یا با هم درباره موضوعات مختلف گفتگو کنیم.", listOf("یادآور جدید", "یادآورهای امروز"))
+        }
+        if (lower.contains("کی هستی") || lower.contains("چه کارهایی بلدی") || lower.contains("راهنما")) {
+            return Pair("من دستیار هوشمند یادت (Yadet) هستم. شما می‌توانید:\n۱. درباره مسائل روزمره، علمی، یادگیری، فناوری، تندرستی و برنامه‌ریزی با من مشورت و گفتگو کنید.\n۲. قرارها و یادآوری‌هایتان را به فارسی محاوره‌ای ثبت، ویرایش، حذف یا تکرار کنید.\n۳. تنظیمات برنامه مانند پیش‌اعلان و تم را با فرمان صوتی تغییر دهید.", listOf("فردا ۱۰ صبح یادم بنداز", "یک ربع دیگه یادم بنداز"))
+        }
+        return null
+    }
+
+    private fun isQueryRemindersIntent(input: String): Boolean {
+        val lower = input.lowercase()
+        return lower.contains("چه یادآور") || lower.contains("لیست یادآور") || lower.contains("کارهام چیه") || lower.contains("برنامه‌ام چیه") || lower.contains("چه برنامه‌ای")
+    }
+
+    private fun isMeaningfulQuestionOrIdeation(input: String): Boolean {
+        val lower = input.lowercase().trim()
+        val questionWords = listOf(
+            "چطور", "چگونه", "چیست", "کیه", "چیه", "چرا", "کجا", "توضیح", "تعریف",
+            "آموزش", "یاد بده", "برنامه‌نویسی", "پایتون", "اندروید", "هوش مصنوعی",
+            "ایده", "پیشنهاد", "مقایسه", "فرق", "تفاوت", "راهکار", "راهنمایی",
+            "کدام", "آیا", "به نظرت", "نظر شما", "برنامه‌ریزی", "بهره‌وری", "؟", "?"
+        )
+        if (questionWords.any { lower.contains(it) }) return true
+        if (lower.length >= 15 && !lower.contains("الکی") && !lower.contains("فلان بیسار") && !lower.contains("بی‌معنی")) {
+            return true
+        }
+        return false
+    }
+
+    private fun extractCleanTitleFromReply(input: String): String {
+        var clean = input.trim()
+        clean = clean.replace(Regex("^(باید|میخوام|می‌خوام|لطفاً|لطفا|قراره)\\s+"), "")
+        clean = clean.replace(Regex("^(برم|بروم)\\s+"), "رفتن به ")
+        return clean
+    }
+
+    private fun extractNumber(text: String): Int? {
+        val clean = PersianDateEngine.toEnglishDigits(text)
+        val match = Regex("\\d+").find(clean) ?: return null
+        return match.value.toIntOrNull()
+    }
+
+    private fun extractMinuteOffset(input: String): Int? {
+        if (input.contains("نیم ساعت")) return 30
+        if (input.contains("یک ربع") || input.contains("یه ربع")) return 15
+        if (input.contains("یک ساعت") || input.contains("یه ساعت")) return 60
+        if (input.contains("دو ساعت")) return 120
+        val num = extractNumber(input)
+        if (num != null && input.contains("دقیقه")) return num
+        if (num != null && input.contains("ساعت")) return num * 60
+        return null
+    }
+
+    private fun parseSimpleColloquialHour(input: String, referenceTimeMillis: Long, timeZone: TimeZone): Long? {
+        val num = extractNumber(input) ?: return null
+        if (num in 0..23) {
+            val cal = Calendar.getInstance(timeZone).apply {
+                timeInMillis = referenceTimeMillis
+                set(Calendar.HOUR_OF_DAY, num)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+            }
+            if (cal.timeInMillis < referenceTimeMillis) {
+                cal.add(Calendar.DAY_OF_YEAR, 1)
+            }
+            return cal.timeInMillis
+        }
+        return null
+    }
+
+    private fun resolveCandidateSelection(input: String, candidateIds: List<Long>): Long? {
+        if (candidateIds.isEmpty()) return null
+        if (input.contains("اول") || input.contains("یک") || input.contains("1")) return candidateIds.getOrNull(0)
+        if (input.contains("دوم") || input.contains("دو") || input.contains("2")) return candidateIds.getOrNull(1)
+        if (input.contains("سوم") || input.contains("سه") || input.contains("3")) return candidateIds.getOrNull(2)
+        return candidateIds.firstOrNull()
+    }
+
+    private fun isYesterday(timestamp: Long, referenceTimeMillis: Long): Boolean {
+        val cal = Calendar.getInstance().apply { timeInMillis = referenceTimeMillis }
+        cal.add(Calendar.DAY_OF_YEAR, -1)
+        val yDay = cal.get(Calendar.DAY_OF_YEAR)
+        val yYear = cal.get(Calendar.YEAR)
+
+        val targetCal = Calendar.getInstance().apply { timeInMillis = timestamp }
+        return targetCal.get(Calendar.DAY_OF_YEAR) == yDay && targetCal.get(Calendar.YEAR) == yYear
+    }
+}

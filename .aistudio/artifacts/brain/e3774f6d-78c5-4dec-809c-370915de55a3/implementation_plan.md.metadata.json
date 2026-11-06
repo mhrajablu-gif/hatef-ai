@@ -1,0 +1,6 @@
+{
+  "summary":  "Comprehensive architectural blueprint and implementation plan for the intelligent Persian AI assistant reminder and task management Android application. Covers local Room persistence, Push-to-Talk speech capture, Gemini semantic parsing, robust Jalali (Shamsi) date/time engine, AlarmManager notifications, reports, and modern soft-glassmorphic RTL UI.",
+  "updatedAt":  "2026-10-26T10:31:28.191182728Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}
