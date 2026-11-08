@@ -123,8 +123,11 @@ class ConversationalAiEngine(
             return handleAppointmentOrReminderAction(cleanInput, currentState, referenceTimeMillis, timeZone)
         }
 
-        // 10. General Knowledge / Ideation / Explanations / Everyday Chatbot (General AI Chatbot)
-        if (isMeaningfulQuestionOrIdeation(cleanInput)) {
+        // 10. General AI Conversational Assistant (Gemini)
+        // Any everyday talk, thoughts, emotions, health questions, or general queries go to GeneralConversationalAiService
+        val isNonsenseOrGibberish = cleanInput.contains("الکی") || cleanInput.contains("فلان بیسار") ||
+                cleanInput.contains("بی‌معنی") || cleanInput.contains("چرت و پرت")
+        if (!isNonsenseOrGibberish && cleanInput.isNotBlank()) {
             val generalReply = generalAiService.generateChatReply(
                 userMessage = cleanInput,
                 recentHistory = recentHistory,
@@ -137,11 +140,11 @@ class ConversationalAiEngine(
                     awaitingField = AwaitingField.NONE,
                     slotStatus = SlotFillingStatus.IDLE
                 ),
-                suggestedReplies = listOf("فردا ساعت ۱۰ یادم بنداز", "یادآورهای امروز من چیه؟", "بیشتر توضیح بده")
+                suggestedReplies = listOf("فردا ساعت ۱۰ یادم بنداز", "یادآورهای امروز من چیه؟", "بیشتر برام بگو")
             )
         }
 
-        // 11. Unrecognized or ambiguous gibberish
+        // 11. Unrecognized or blank
         return ConversationalResponse(
             replyText = "متوجه درخواست شما نشدم؛ لطفاً واضح‌تر بفرمایید، یا بگویید چه کاری و در چه زمانی را مایلید یادتان بیندازم.",
             newState = currentState.copy(
@@ -360,6 +363,7 @@ class ConversationalAiEngine(
             return ConversationalResponse(
                 replyText = q,
                 newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
                     draftTask = task,
                     awaitingField = AwaitingField.TITLE,
                     slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
@@ -375,6 +379,7 @@ class ConversationalAiEngine(
             return ConversationalResponse(
                 replyText = q,
                 newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
                     draftTask = task,
                     awaitingField = AwaitingField.TIME_OR_DATE,
                     slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
@@ -396,6 +401,7 @@ class ConversationalAiEngine(
         return ConversationalResponse(
             replyText = confirmMsg,
             newState = state.copy(
+                activeIntent = ConversationIntent.CREATE_REMINDER,
                 draftTask = task,
                 awaitingField = AwaitingField.EXECUTION_CONFIRMATION,
                 slotStatus = SlotFillingStatus.AWAITING_CONFIRMATION,
@@ -1407,37 +1413,59 @@ class ConversationalAiEngine(
     private fun isAppointmentOrReminderAction(input: String): Boolean {
         val clean = input.trim().lowercase()
 
-        // Exclude questions, consultation, and user routine statements
+        // 1. Explicit Exclusions: Consultation, user habits, everyday states, feelings, or exams without explicit reminder commands
         if (isConsultationOrAdviceQuestion(clean)) return false
-        if (clean.contains("معمولاً") || clean.contains("معمولا")) return false
-        if (clean.contains("به نظرت") || clean.contains("خوبه؟") || clean.contains("خوبه") || clean.contains("چطوره")) return false
-        if (clean.contains("بیدار میشم") && !clean.contains("یادم بنداز") && !clean.contains("تنظیم کن")) return false
+        if (clean.contains("معمولاً") || clean.contains("معمولا") || clean.contains("عادت دارم") || clean.contains("همیشه")) return false
+        if (clean.contains("به نظرت") || clean.contains("خوبه؟") || clean.contains("خوبه") || clean.contains("چطوره") || clean.contains("درسته")) return false
+        if (clean.contains("ساعت چنده") || clean.contains("ساعت چند است") || clean.contains("الان ساعت چنده")) return false
 
+        // Emotional & physiological states without explicit reminder imperative
+        val isEmotionalOrPhysiological = clean.contains("خسته‌ام") || clean.contains("خسته ام") ||
+                clean.contains("استراحت کنم") || clean.contains("حالم") || clean.contains("حالم خوب نیست") ||
+                clean.contains("حالم بده") || clean.contains("انرژی ندارم") || clean.contains("کسلم") ||
+                clean.contains("سلامتی‌ام") || clean.contains("سلامتیم")
+
+        // Routine / personal life statements without explicit reminder imperative
+        val isRoutineOrPersonalStatement = clean.contains("امتحان دارم") || clean.contains("کنکور دارم") ||
+                clean.contains("درس دارم") || clean.contains("سفر می‌روم") || clean.contains("سفر میرم") ||
+                clean.contains("مسافرت میرم") || clean.contains("مطالعه کنم") || clean.contains("کتاب بخونم") ||
+                clean.contains("بیدار میشم") || clean.contains("بیدار می‌شوم") || clean.contains("می‌خوابم") ||
+                clean.contains("میخوابم")
+
+        // 2. Explicit Positive Imperatives for creating or configuring reminders
         val directTriggers = listOf(
-            "یادم بنداز", "یادم بیار", "یادم نره", "یادآوری کن", "یادآور بذار", "یاداور بذار", "یادآور تنظیم کن",
-            "قرار بذار", "تنظیم کن", "ثبت کن", "یادداشت کن", "آلارم بذار", "هشدار بذار", "ساعت بذار",
-            "وقت دکتر", "جلسه با", "جلسه کاری", "قرار ملاقات", "تماس با"
+            "یادم بنداز", "یادم بیار", "یادم نره", "یادم باشه", "یادم بمونه",
+            "یادآوری کن", "یادآور بذار", "یاداور بذار", "یادآور بگذار", "یادآور تنظیم کن", "یادآور ثبت کن", "یادآور بساز",
+            "یک یادآور", "یه یادآور", "یک یادآوری", "یه یادآوری",
+            "قرار بذار", "قرار بگذار", "قرار تنظیم کن", "قرار ثبت کن",
+            "جلسه بذار", "جلسه بگذار", "جلسه تنظیم کن", "جلسه ثبت کن",
+            "وقت دکتر بذار", "وقت دکتر تنظیم کن", "وقت دکتر ثبت کن",
+            "آلارم بذار", "آلارم بگذار", "آلارم تنظیم کن", "آلارم ست کن",
+            "هشدار بذار", "هشدار بگذار", "هشدار تنظیم کن", "هشدار ست کن",
+            "زنگ بذار", "زنگ بگذار", "زنگ تنظیم کن", "زنگ ساعت", "کوک کن",
+            "بیدارم کن", "منو بیدار کن", "من رو بیدار کن", "تماس با", "جلسه با", "قرار با"
         )
-        if (directTriggers.any { clean.contains(it) }) return true
+
+        val hasDirectTrigger = directTriggers.any { clean.contains(it) }
 
         val modTriggers = listOf(
-            "عقب بنداز", "جلو بنداز", "عوض کن", "تغییر بده", "منتقل کن", "به تعویق بنداز",
+            "عقب بنداز", "جلو بنداز", "عوض کن", "تغییر بده", "منتقل کن", "به تعویق بنداز", "موکول کن", "تاخیر بنداز",
             "حذف کن", "پاک کن", "لغو کن", "کنسل کن", "انجام شد", "تکمیل شد", "پیش‌اعلان", "اعلان بذار"
         )
-        if (modTriggers.any { clean.contains(it) }) return true
 
-        val hasTimeContext = clean.contains("ساعت") || clean.contains("فردا") || clean.contains("پسفردا") ||
-                clean.contains("پس فردا") || clean.contains("امروز") || clean.contains("دقیقه دیگه") ||
-                clean.contains("یک ربع دیگه") || clean.contains("نیم ساعت دیگه") || clean.contains("هفته بعد") ||
-                clean.contains("دیروز")
+        val hasModTrigger = modTriggers.any { clean.contains(it) }
 
-        val hasActionVerb = clean.contains("برم") || clean.contains("بروم") || clean.contains("بیام") ||
-                clean.contains("بگیرم") || clean.contains("بخرم") || clean.contains("بدم") ||
-                clean.contains("بفرستم") || clean.contains("بزنم") || clean.contains("بخوانم") ||
-                clean.contains("دارم") || clean.contains("کاری") || clean.contains("باید")
+        // General explicit scheduling verbs ("تنظیم کن", "ثبت کن") when applied to a task, reminder, alarm, appointment, or specific hour
+        val hasGeneralScheduleVerb = (clean.contains("تنظیم کن") || clean.contains("ثبت کن") || clean.contains("ست کن")) &&
+                (clean.contains("ساعت") || clean.contains("فردا") || clean.contains("یادآور") || clean.contains("قرار") || clean.contains("جلسه") || clean.contains("آلارم") || clean.contains("برام"))
 
-        if (hasTimeContext && (hasActionVerb || clean.contains("ساعت"))) {
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb) {
             return true
+        }
+
+        // If the statement is emotional, physiological, or everyday news/statement, and lacked the explicit triggers above, definitely false!
+        if (isEmotionalOrPhysiological || isRoutineOrPersonalStatement) {
+            return false
         }
 
         return false
@@ -1459,14 +1487,18 @@ class ConversationalAiEngine(
     }
 
     private fun isGenericSubject(title: String): Boolean {
-        val clean = title.trim()
+        var clean = title.trim()
+        clean = clean.replace(Regex("""^(?:برای|یک|یه|لطفاً|لطفا)\s+"""), "").trim()
+        clean = clean.replace(Regex("""^(?:یک|یه)\s+"""), "").trim()
         if (clean.isBlank() || clean.startsWith("یادآوری ساعت") || clean == "یادآوری" || clean == "یادآور" || clean == "یادآوری بدون عنوان") return true
         val genericExactPhrases = setOf(
             "کاری", "کار", "یه کار", "یه کاری", "یه کاری دارم", "کاری دارم", "کارهایم", "کارهام",
-            "یک کاری دارم", "یک کاری", "یک کار", "کارم", "تنظیم کن", "ثبت کن", "بذار", "کن", "یادآور", "یادآوری"
+            "یک کاری دارم", "یک کاری", "یک کار", "کارم", "تنظیم کن", "ثبت کن", "بذار", "کن", "یادآور", "یادآوری",
+            "یک یادآور", "یه یادآور", "یک یادآوری", "یه یادآوری", "یادآور ثبت کن", "یادآور تنظیم کن"
         )
         if (genericExactPhrases.contains(clean)) return true
-        if (clean.startsWith("یه کاری") || clean.startsWith("یک کاری") || clean.startsWith("کاری دارم") || clean.startsWith("یه کار دارم")) return true
+        if (clean.startsWith("یه کاری") || clean.startsWith("یک کاری") || clean.startsWith("کاری دارم") || clean.startsWith("یه کار دارم") ||
+            clean.startsWith("یک یادآور") || clean.startsWith("یه یادآور") || clean.startsWith("یادآور")) return true
         return false
     }
 

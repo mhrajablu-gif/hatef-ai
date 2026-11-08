@@ -24,7 +24,7 @@ class GeneralConversationalAiService {
 
     /**
      * Answers general inquiries, brainstorms ideas, explains concepts, offers logical advice,
-     * or engages in natural conversation.
+     * or engages in natural conversation using online Gemini AI.
      * Guaranteed zero-cost, no paid subscriptions, no hardcoded API keys.
      */
     suspend fun generateChatReply(
@@ -35,64 +35,104 @@ class GeneralConversationalAiService {
         val trimmed = userMessage.trim()
         if (trimmed.isBlank()) return "درود! من یادت هستم؛ چطور می‌توانم کمکتان کنم؟"
 
-        // Check if there is an immediate offline advisory match first
-        val directAdvisory = checkDirectAdvisoryOrRoutine(trimmed)
-        if (directAdvisory != null) {
-            return directAdvisory
-        }
+        // Online path: at most 2 attempts (1 initial + 1 controlled retry) with cancellation awareness
+        var attempts = 0
+        val maxAttempts = 2
+        var lastException: Exception? = null
 
-        return try {
-            withTimeout(15_000L) {
-                val systemPrompt = """
-                    شما «یادت» (Yadet) هستید؛ یک دستیار هوشمند، دانا، منطقی، دقیق، راهنما و همراه همه‌فن‌حریف به زبان فارسی.
-                    شما یک چت‌بات عمومی پیشرفته و مشاور برنامه‌ریزی هستید، نه فقط یک برنامه ثبت یادآور.
-                    
-                    رفتار و هویت:
-                    ۱. شما می‌توانید درباره تمام موضوعات عمومی، علمی، فناوری، برنامه‌نویسی، ادبیات، مسائل روزمره، برنامه‌ریزی زندگی و ایده‌پردازی با کاربر صحبت کنید.
-                    ۲. پاسخ‌های شما طبیعی، شیوا، مستدل و همراه با منطق است (نه کلیشه‌ای یا ماشینی).
-                    ۳. نقش مشاور منطقی: اگر کاربر برنامه‌ای غیرمعمول یا آسیب‌زننده ارائه داد (مثل ورزش سنگین در نیمه‌شب یا خوابیدن ۴ ساعت در شبانه‌روز)، پیامدهای احتمالی را با احترام گوشزد کنید و پیشنهاد جایگزین بدهید، اما تصمیم نهایی را به کاربر بسپارید.
-                    ۴. تفاوت مکالمه از فرمان: اگر کاربر صرفاً اطلاعاتی به اشتراک گذاشت («من معمولاً ساعت ۸ بیدار میشم») یا سوالی پرسید («به نظرت ورزش ۱۲ شب خوبه؟»)، آن را به یادآور تبدیل نکنید؛ گفتگو کنید و نظر تحلیلی بدهید.
-                    ۵. از زیاده‌گویی بی‌مورد پرهیز کنید، اما در مباحث تحلیلی یا توضیحی، جامع و مفید پاسخ دهید.
-                    
-                    ${userContextSummary ?: ""}
-                """.trimIndent()
-
-                val conversationHistory = recentHistory.takeLast(6).map { msg ->
-                    val role = if (msg.sender == MessageSender.USER) "user" else "model"
-                    content(role) { text(msg.text) }
+        while (attempts < maxAttempts) {
+            attempts++
+            try {
+                return withTimeout(20_000L) {
+                    executeOnlineTurn(trimmed, recentHistory, userContextSummary)
                 }
-
-                val promptWithContext = if (conversationHistory.isNotEmpty()) {
-                    val fullChat = model.startChat(
-                        history = listOf(
-                            content("user") { text(systemPrompt) },
-                            content("model") { text("متوجه شدم. من «یادت» هستم؛ دستیار هوشمند و مشاور شما به زبان فارسی.") }
-                        ) + conversationHistory
-                    )
-                    fullChat.sendMessage(trimmed).text
-                } else {
-                    val res = model.generateContent(
-                        content {
-                            text("$systemPrompt\n\nکاربر: $trimmed\nیادت:")
-                        }
-                    )
-                    res.text
-                }
-
-                if (!promptWithContext.isNullOrBlank()) {
-                    promptWithContext.trim()
-                } else {
-                    getOfflineKnowledgeReply(trimmed)
+            } catch (e: CancellationException) {
+                // Cooperative coroutine cancellation must NEVER be swallowed
+                throw e
+            } catch (e: Exception) {
+                lastException = e
+                Log.w(TAG, "Gemini turn attempt $attempts failed: ${e.message}")
+                if (attempts < maxAttempts) {
+                    kotlinx.coroutines.delay(1000L)
                 }
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            runCatching {
-                Log.w(TAG, "Online Gemini AI chat fallback triggered: ${e.message}")
-            }
-            getOfflineKnowledgeReply(trimmed)
         }
+
+        // When network/API is unreachable (e.g. offline mode or test environment), check for domain knowledge fallback
+        Log.e(TAG, "Online Gemini AI communication failed: ${lastException?.message}", lastException)
+        val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
+        if (offlineFallback != null) {
+            return offlineFallback
+        }
+
+        // Honest error reporting when no response could be generated; never mask as fake Gemini reply
+        return "متأسفانه در حال حاضر امکان برقراری ارتباط با دستیار هوشمند وجود ندارد. لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید."
+    }
+
+    private suspend fun executeOnlineTurn(
+        trimmed: String,
+        recentHistory: List<ChatMessage>,
+        userContextSummary: String?
+    ): String {
+        val systemPrompt = buildSystemPrompt(userContextSummary)
+
+        // 1. Filter out the current user message from prior history so it is not sent twice
+        val priorHistory = if (recentHistory.isNotEmpty() &&
+            recentHistory.last().sender == MessageSender.USER &&
+            recentHistory.last().text.trim() == trimmed
+        ) {
+            recentHistory.dropLast(1)
+        } else {
+            recentHistory
+        }
+
+        // 2. Build properly alternating conversation turns for startChat
+        val historyContentList = mutableListOf<com.google.firebase.ai.type.Content>()
+        historyContentList.add(content("user") { text(systemPrompt) })
+        historyContentList.add(content("model") { text("متوجه شدم. من «یادت»، دستیار هوشمند، دانا و همراه شما به زبان فارسی هستم.") })
+
+        // Extract clean alternating turns from prior history (up to last 8 messages)
+        val cleanPrior = priorHistory.takeLast(8)
+        var expectedSender = MessageSender.USER
+        for (msg in cleanPrior) {
+            if (msg.sender == expectedSender && msg.text.isNotBlank()) {
+                val role = if (msg.sender == MessageSender.USER) "user" else "model"
+                historyContentList.add(content(role) { text(msg.text.trim()) })
+                expectedSender = if (expectedSender == MessageSender.USER) MessageSender.ASSISTANT else MessageSender.USER
+            }
+        }
+
+        // Ensure history ends on a 'model' turn so the subsequent sendMessage creates a valid user->model turn
+        if (historyContentList.isNotEmpty() && historyContentList.last().role == "user") {
+            historyContentList.removeAt(historyContentList.lastIndex)
+        }
+
+        val chat = model.startChat(history = historyContentList)
+        val response = chat.sendMessage(trimmed)
+        val reply = response.text?.trim()
+        if (reply.isNullOrBlank()) {
+            throw IllegalStateException("Empty response received from Gemini model")
+        }
+        return reply
+    }
+
+    private fun buildSystemPrompt(userContextSummary: String?): String {
+        val memoryBlock = if (!userContextSummary.isNullOrBlank()) "\nاطلاعات و ترجیحات کاربر:\n$userContextSummary\n" else ""
+        return """
+            شما «یادت» (Yadet) هستید؛ یک دستیار هوشمند، دانا، منطقی، دقیق، راهنما و همراه همه‌فن‌حریف به زبان فارسی.
+            شما یک چت‌بات عمومی پیشرفته و مشاور برنامه‌ریزی هستید، نه یک سیستم خشکِ فرمانی یا ربات صرفاً ثبت یادآور.
+            
+            اصول رفتاری و هویت:
+            ۱. لحن و سبک زبان: به زبان فارسی طبیعی، سلیس، روان، محترمانه و امروزی گفتگو کنید. پاسخ‌ها نه بیش از حد کوتاه و کلیشه‌ای باشند و نه پرگویی کسالت‌بار داشته باشند؛ بلکه عمق پاسخ باید متناسب با پیچیدگی پرسش کاربر باشد.
+            ۲. تفکیک گفتگو و احساس از فرمان:
+               - اگر کاربر احساسات، افکار، درددل، درد یا خستگی را بیان کرد (مانند: «امروز خیلی خسته‌ام و باید استراحت کنم» یا «حالم خوب نیست»)، با مهربانی، درک و همدلی انسانی گفتگو کنید و هرگز آن را به یادآور یا آلارم تبدیل نکنید.
+               - اگر کاربر خبری درباره آینده داد (مانند: «فردا امتحان سختی دارم» یا «هفته آینده احتمالاً سفر می‌روم»)، آن را به عنوان یک رویداد در جریان مکالمه بپذیرید، به او روحیه دهید و راهکارهای مدیریت زمان یا کاهش استرس پیشنهاد دهید؛ اما بدون درخواست صریح کاربر اقدام به ساخت یادآور نکنید.
+               - فقط در صورتی که کاربر صراحتاً و مشخصاً درخواست یادآوری کرد (مانند: «یادم بنداز»، «یادآور بذار»، «آلارم تنظیم کن»)، او را برای تنظیم یادآوری راهنمایی کنید.
+            ۳. مشاوره منطقی و تحلیل‌گری: در موضوعات سلامت، خواب، مدیریت زمان، اهداف و عادات (مانند خوابیدن ۴ ساعت یا ورزش سنگین در نیمه‌شب)، پیامدهای علمی و منطقی را مؤدبانه شرح دهید و تصمیم نهایی را به کاربر بسپارید.
+            ۴. استدلال و پاسخگویی چندمرحله‌ای: به سوابق گفتگوهای قبلی توجه کنید و در مکالمات چندمرحله‌ای زمینه قبلی را به یاد داشته باشید.
+            ۵. عدم ادعای کذب: هرگز وانمود نکنید عملیاتی (مانند ایجاد، تغییر یا حذف یادآور در دیتابیس) را خودبه‌خود انجام داده‌اید مگر اینکه کاربر دستور فرمانی صریح داده باشد.
+            $memoryBlock
+        """.trimIndent()
     }
 
     /**
