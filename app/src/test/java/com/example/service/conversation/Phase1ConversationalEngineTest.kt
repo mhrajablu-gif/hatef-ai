@@ -224,4 +224,121 @@ class Phase1ConversationalEngineTest {
         assertFalse("نباید منتظر اسلات باشد", response.newState.isWaitingForAnswer())
         assertTrue("پاسخ هوش مصنوعی نباید خالی باشد", response.replyText.isNotBlank())
     }
+
+    // ==========================================
+    // بخش ۴: سناریوهای الزامی رفع باگ «تماس با»، «جلسه با»، «قرار با»
+    // ==========================================
+
+    @Test
+    fun test14_CallWithAliStatementDoesNotCreateReminder() = runBlocking {
+        val input = "فردا با علی تماس دارم."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertNotEquals("«فردا با علی تماس دارم.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun test15_ManagerMeetingStatementDoesNotCreateReminder() = runBlocking {
+        val input = "امروز با مدیر جلسه دارم."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertNotEquals("«امروز با مدیر جلسه دارم.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun test16_DoctorConsultationStatementDoesNotCreateReminder() = runBlocking {
+        val input = "هفته آینده باید با پزشک صحبت کنم."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertNotEquals("«هفته آینده باید با پزشک صحبت کنم.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun test17_CallAtEightStatementDoesNotCreateReminder() = runBlocking {
+        val input = "فردا ساعت ۸ با علی تماس میگیرم."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertNotEquals("«فردا ساعت ۸ با علی تماس میگیرم.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun test18_WakeUpEarlyStatementDoesNotCreateReminder() = runBlocking {
+        val input = "فردا باید زود بیدار شوم."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertNotEquals("«فردا باید زود بیدار شوم.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun test19_WorkoutAtMidnightStatementDoesNotCreateReminder() = runBlocking {
+        val input = "ساعت ۱۲ شب ورزش کردن مناسب نیست."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertNotEquals("«ساعت ۱۲ شب ورزش کردن مناسب نیست.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun test20_ExplicitCallReminderCreated() = runBlocking {
+        val input = "یادم بنداز فردا ساعت ۸ با علی تماس بگیرم."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals("باید نیت CREATE_REMINDER باشد", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertNotNull("پیش‌نویس یادآور باید ساخته شود", response.newState.draftTask)
+        assertTrue("عنوان باید شامل علی یا تماس باشد", response.newState.draftTask?.title?.contains("علی") == true || response.newState.draftTask?.title?.contains("تماس") == true)
+        assertEquals("ساعت باید ۰۸:۰۰ باشد", "۰۸:۰۰", response.newState.draftTask?.timeText)
+    }
+
+    @Test
+    fun test21_ExplicitMeetingReminderCreated() = runBlocking {
+        val input = "برای فردا ساعت ۱۰ جلسه با مدیر ثبت کن."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals("باید نیت CREATE_REMINDER باشد", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertNotNull("پیش‌نویس یادآور باید ساخته شود", response.newState.draftTask)
+        assertTrue("عنوان باید شامل جلسه یا مدیر باشد", response.newState.draftTask?.title?.contains("مدیر") == true || response.newState.draftTask?.title?.contains("جلسه") == true)
+        assertEquals("ساعت باید ۱۰:۰۰ باشد", "۱۰:۰۰", response.newState.draftTask?.timeText)
+    }
+
+    @Test
+    fun test22_ExplicitDoctorAppointmentReminderCreated() = runBlocking {
+        val input = "لطفاً برای پنجشنبه وقت دکتر تنظیم کن."
+        val response = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals("باید نیت CREATE_REMINDER باشد", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertNotNull("پیش‌نویس یادآور باید ساخته شود", response.newState.draftTask)
+        assertTrue("عنوان باید شامل دکتر یا وقت باشد", response.newState.draftTask?.title?.contains("دکتر") == true || response.newState.draftTask?.title?.contains("وقت") == true)
+    }
 }

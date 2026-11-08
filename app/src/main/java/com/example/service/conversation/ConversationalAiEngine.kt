@@ -1401,7 +1401,7 @@ class ConversationalAiEngine(
         val lower = input.lowercase().trim()
         if (lower.startsWith("سلام") || lower.startsWith("درود") || lower.contains("حالت چطوره") || lower.contains("چطوری") || lower.contains("خوبی")) return false
         val adviceTriggers = listOf(
-            "به نظرت", "نظر شما", "خوبه؟", "خوبه", "مناسبه", "چه ساعتی",
+            "به نظرت", "نظر شما", "خوبه؟", "خوبه", "مناسبه", "مناسب است", "مناسب نیست", "چه ساعتی",
             "پیشنهاد میدی", "پیشنهادت چیه", "مشورت", "درسته؟", "صحیحه؟",
             "کم‌خوابی", "۴ ساعت بخوابم", "4 ساعت بخوابم", "۱۲ شب ورزش", "12 شب ورزش",
             "خوابم کمه", "خستگی", "خواب کافی", "کی ورزش کنم"
@@ -1425,12 +1425,17 @@ class ConversationalAiEngine(
                 clean.contains("حالم بده") || clean.contains("انرژی ندارم") || clean.contains("کسلم") ||
                 clean.contains("سلامتی‌ام") || clean.contains("سلامتیم")
 
-        // Routine / personal life statements without explicit reminder imperative
+        // Routine / personal life statements / stative plans without explicit reminder imperative
         val isRoutineOrPersonalStatement = clean.contains("امتحان دارم") || clean.contains("کنکور دارم") ||
                 clean.contains("درس دارم") || clean.contains("سفر می‌روم") || clean.contains("سفر میرم") ||
                 clean.contains("مسافرت میرم") || clean.contains("مطالعه کنم") || clean.contains("کتاب بخونم") ||
-                clean.contains("بیدار میشم") || clean.contains("بیدار می‌شوم") || clean.contains("می‌خوابم") ||
-                clean.contains("میخوابم")
+                clean.contains("بیدار میشم") || clean.contains("بیدار می‌شوم") || clean.contains("بیدار شوم") ||
+                clean.contains("می‌خوابم") || clean.contains("میخوابم") ||
+                clean.contains("تماس دارم") || clean.contains("جلسه دارم") || clean.contains("قرار دارم") ||
+                clean.contains("صحبت کنم") || clean.contains("حرف بزنم") ||
+                clean.contains("تماس میگیرم") || clean.contains("تماس می‌گیرم") ||
+                clean.contains("جلسه میگیرم") || clean.contains("جلسه می‌گیرم") ||
+                (clean.contains("باید") && (clean.contains("بیدار") || clean.contains("برم") || clean.contains("صحبت") || clean.contains("استراحت")))
 
         // 2. Explicit Positive Imperatives for creating or configuring reminders
         val directTriggers = listOf(
@@ -1443,7 +1448,7 @@ class ConversationalAiEngine(
             "آلارم بذار", "آلارم بگذار", "آلارم تنظیم کن", "آلارم ست کن",
             "هشدار بذار", "هشدار بگذار", "هشدار تنظیم کن", "هشدار ست کن",
             "زنگ بذار", "زنگ بگذار", "زنگ تنظیم کن", "زنگ ساعت", "کوک کن",
-            "بیدارم کن", "منو بیدار کن", "من رو بیدار کن", "تماس با", "جلسه با", "قرار با"
+            "بیدارم کن", "منو بیدار کن", "من رو بیدار کن"
         )
 
         val hasDirectTrigger = directTriggers.any { clean.contains(it) }
@@ -1457,13 +1462,18 @@ class ConversationalAiEngine(
 
         // General explicit scheduling verbs ("تنظیم کن", "ثبت کن") when applied to a task, reminder, alarm, appointment, or specific hour
         val hasGeneralScheduleVerb = (clean.contains("تنظیم کن") || clean.contains("ثبت کن") || clean.contains("ست کن")) &&
-                (clean.contains("ساعت") || clean.contains("فردا") || clean.contains("یادآور") || clean.contains("قرار") || clean.contains("جلسه") || clean.contains("آلارم") || clean.contains("برام"))
+                (clean.contains("ساعت") || clean.contains("فردا") || clean.contains("یادآور") || clean.contains("قرار") || clean.contains("جلسه") || clean.contains("آلارم") || clean.contains("برام") || clean.contains("وقت دکتر"))
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb) {
+        // Concise calendar entry shorthand: e.g. "سه‌شنبه ساعت ۱۹ تماس با همکار"
+        val hasWeekday = clean.contains("شنبه") || clean.contains("یکشنبه") || clean.contains("دوشنبه") ||
+                clean.contains("سه‌شنبه") || clean.contains("چهارشنبه") || clean.contains("پنجشنبه") || clean.contains("جمعه")
+        val hasClockTime = clean.contains("ساعت") && Regex("""ساعت\s*[\d۰-۹]{1,2}""").containsMatchIn(clean)
+        val isConciseCalendarEntry = hasWeekday && hasClockTime && !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement
+
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry) {
             return true
         }
 
-        // If the statement is emotional, physiological, or everyday news/statement, and lacked the explicit triggers above, definitely false!
         if (isEmotionalOrPhysiological || isRoutineOrPersonalStatement) {
             return false
         }
