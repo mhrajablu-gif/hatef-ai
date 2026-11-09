@@ -9,7 +9,7 @@ class GeneralConversationalAiServiceTest {
     @Test
     fun unsupportedOfflineQuestionDoesNotReturnTheGenericRepetition() {
         val reply = GeneralConversationalAiService()
-            .getOfflineKnowledgeReply("لطفاً درباره طراحی یک کسب‌وکار هنری راهنمایی‌ام کن")
+            .getOfflineKnowledgeReply("لطفاً درباره موضوعی کاملاً ناشناخته راهنمایی‌ام کن")
 
         assertFalse(reply.contains("من سوال یا دیدگاه شما را بررسی کردم"))
         assertFalse(reply.contains("جزئیات بیشتری درباره موضوع بفرمایید"))
