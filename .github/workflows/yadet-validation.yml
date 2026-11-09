@@ -1,0 +1,60 @@
+name: Yadet validation (tests + debug APK)
+
+on:
+  push:
+    branches:
+      - "fix/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Unit tests and debug APK
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Prepare Gradle
+        run: chmod +x ./gradlew
+
+      - name: Check Firebase runtime configuration
+        shell: bash
+        run: |
+          if [ -f "app/google-services.json" ]; then
+            echo "Firebase configuration file is present."
+          else
+            echo "::warning::app/google-services.json is missing. The APK can compile with the repository's WARN setting, but Firebase AI Logic may not initialize at runtime. Do not treat a successful build as proof that Gemini connectivity works."
+          fi
+
+      - name: Run unit tests and build debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yadet-validation-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yadet-unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
