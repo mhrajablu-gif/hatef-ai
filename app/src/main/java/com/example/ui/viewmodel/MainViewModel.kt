@@ -415,7 +415,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     taskNeedingClarification.copy(
                         hasExplicitTime = false,
                         isAmbiguous = false,
-                        clarificationQuestion = null
+                        clarificationQuestion = null,
+                        analyzedResult = null
                     )
                 } else {
                     taskNeedingClarification
@@ -491,7 +492,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     hasExplicitTime = hasTime,
                     hasExplicitDate = hasDate,
                     clarificationQuestion = null,
-                    isAmbiguous = false
+                    isAmbiguous = false,
+                    analyzedResult = null
                 )
 
                 if (responseAmbiguousTime || !hasDate || !hasTime) {
