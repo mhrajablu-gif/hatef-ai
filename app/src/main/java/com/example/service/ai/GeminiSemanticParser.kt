@@ -31,8 +31,19 @@ data class ParsedTask(
     val quickSuggestions: List<String> = emptyList(),
     val analyzedResult: AnalyzedCommandResult? = null
 ) {
+    val hasResolvedRelativeDateTime: Boolean
+        get() = rawTimePhrase.isRelativeDateTimePhrase()
+
     val needsClarification: Boolean
-        get() = clarificationQuestion != null || isAmbiguous || !hasExplicitTitle || (!hasExplicitTime && !hasExplicitDate)
+        get() = clarificationQuestion != null || isAmbiguous || !hasExplicitTitle ||
+            !hasExplicitTime || (!hasExplicitDate && !hasResolvedRelativeDateTime)
+}
+
+private fun String.isRelativeDateTimePhrase(): Boolean {
+    val phrase = this
+    val hasRelativeMarker = phrase.contains("دیگه") || phrase.contains("بعد") || phrase.contains("دیگر")
+    val hasDurationUnit = phrase.contains("دقیقه") || phrase.contains("ساعت")
+    return hasRelativeMarker && hasDurationUnit
 }
 
 class GeminiSemanticParser {
@@ -186,8 +197,9 @@ class GeminiSemanticParser {
             val jalaliText = targetJalali.formatPersianNumeric()
             val timeText = PersianDateEngine.formatPersianTime(targetJalali.hour, targetJalali.minute)
 
-            val hasExplicitTime = obj.optBoolean("hasExplicitTime", true)
-            val hasExplicitDate = obj.optBoolean("hasExplicitDate", true)
+            val hasRelativeOffset = offsetMins != null && offsetMins > 0
+            val hasExplicitTime = obj.optBoolean("hasExplicitTime", true) || hasRelativeOffset
+            val hasExplicitDate = obj.optBoolean("hasExplicitDate", true) || hasRelativeOffset
             val hasExplicitTitle = obj.optBoolean("hasExplicitTitle", true) && title.isNotBlank() && !title.startsWith("یادآوری ساعت")
 
             results.add(
@@ -264,10 +276,10 @@ class GeminiSemanticParser {
 
         val hasExplicitTitle = extracted.hasExplicitTitle
         val hasExplicitTime = extracted.hasExplicitTime
-        val hasExplicitDate = extracted.hasExplicitDate
+        val hasExplicitDate = extracted.hasExplicitDate || extracted.rawTimePhrase.isRelativeDateTimePhrase()
 
         val clarification = when {
-            !hasExplicitTime && !hasExplicitDate -> "ساعت یا تاریخ برای یادآوری «${extracted.title}» مشخص نشده است؛ مایلید چه زمانی یادآوری شود؟"
+            !hasExplicitTime || !hasExplicitDate -> "برای یادآوری «${extracted.title}»، ${if (!hasExplicitDate && !hasExplicitTime) "تاریخ و ساعت" else if (!hasExplicitDate) "تاریخ" else "ساعت"} مشخص نشده است؛ لطفاً آن را تعیین کنید."
             !hasExplicitTitle -> "زمان یادآوری روی ${extracted.jalaliDateText} ساعت ${extracted.timeText} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
             else -> null
         }
