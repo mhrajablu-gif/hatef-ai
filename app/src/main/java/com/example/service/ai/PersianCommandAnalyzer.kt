@@ -551,7 +551,7 @@ object PersianCommandAnalyzer {
         // Relative calendar days: support digits and spoken Persian numbers
         // e.g. "3 روز دیگه", "سه روز بعد", "بیست و سه روز دیگر".
         val relativeDaysPattern = Regex(
-            """(?:^|[^\\p{L}\\p{N}])((?:\\d{1,3}|یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد)(?:\\s*و\\s*(?:یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده))?)\\s*روز\\s*(دیگه|بعد|دیگر)(?=$|[^\\p{L}\\p{N}])"""
+            """(?:^|[^\p{L}\p{N}])((?:\d{1,3}|یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد)(?:\s*و\s*(?:یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده))?)\s*روز\s*(دیگه|بعد|دیگر)(?=$|[^\p{L}\p{N}])"""
         )
         val relativeDaysMatch = relativeDaysPattern.find(clean)
         val spokenDayOffset = relativeDaysMatch?.let {
@@ -685,7 +685,7 @@ object PersianCommandAnalyzer {
             "پنجاه" to 50, "شصت" to 60, "هفتاد" to 70, "هشتاد" to 80,
             "نود" to 90, "صد" to 100
         )
-        val parts = normalized.split(Regex("""\\s*و\\s*""")).filter { it.isNotBlank() }
+        val parts = normalized.split(Regex("""\s*و\s*""")).filter { it.isNotBlank() }
         if (parts.isEmpty()) return null
         var total = 0
         for (part in parts) {
