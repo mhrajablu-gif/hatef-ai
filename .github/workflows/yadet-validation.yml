@@ -15,10 +15,10 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
@@ -53,11 +53,24 @@ jobs:
             echo "::warning::Firebase configuration is missing. Add the multiline JSON file as the FIREBASE_GOOGLE_SERVICES_JSON repository secret. The APK may compile, but Firebase AI Logic cannot be assumed to initialize."
           fi
 
-      - name: Run unit tests and build debug APK
-        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon
+      - name: Run unit tests and build debug APK (retry transient Gradle download failures)
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            echo "Validation attempt ${attempt}/3"
+            if ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Validation failed; waiting 20 seconds before retry."
+              sleep 20
+            fi
+          done
+          echo "Validation failed after 3 attempts."
+          exit 1
 
       - name: Upload debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Yadet-validation-APK
           path: app/build/outputs/apk/debug/*.apk
@@ -66,7 +79,7 @@ jobs:
 
       - name: Upload unit test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Yadet-unit-test-reports
           path: app/build/reports/tests/testDebugUnitTest/
