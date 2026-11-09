@@ -9,7 +9,8 @@ class ParsedTaskClarificationTest {
     private fun task(
         hasTime: Boolean,
         hasDate: Boolean,
-        rawTimePhrase: String = ""
+        rawTimePhrase: String = "",
+        ambiguous: Boolean = false
     ) = ParsedTask(
         title = "خرید نان",
         triggerTimestamp = 1_800_000_000_000L,
@@ -17,7 +18,8 @@ class ParsedTaskClarificationTest {
         timeText = "۱۰:۰۰",
         rawTimePhrase = rawTimePhrase,
         hasExplicitTime = hasTime,
-        hasExplicitDate = hasDate
+        hasExplicitDate = hasDate,
+        isAmbiguous = ambiguous
     )
 
     @Test
@@ -35,6 +37,17 @@ class ParsedTaskClarificationTest {
         val relative = task(hasTime = true, hasDate = false, rawTimePhrase = "۳۰ دقیقه دیگه")
         assertTrue(relative.hasResolvedRelativeDateTime)
         assertFalse(relative.needsClarification)
+    }
+
+    @Test
+    fun ambiguousMorningOrEveningTimeRequiresClarification() {
+        val ambiguous = task(
+            hasTime = true,
+            hasDate = true,
+            ambiguous = true
+        )
+        assertTrue(ambiguous.hasAmbiguousTimePeriod)
+        assertTrue(ambiguous.needsClarification)
     }
 
     @Test
