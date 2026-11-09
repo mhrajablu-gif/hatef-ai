@@ -91,9 +91,8 @@ class GeneralConversationalAiService {
         historyContentList.add(content("user") { text(systemPrompt) })
         historyContentList.add(content("model") { text("متوجه شدم. من «یادت»، دستیار هوشمند، دانا و همراه شما به زبان فارسی هستم.") })
 
-        // Keep a wider recent window so multi-turn conversations retain more context.
-        // The alternating-role filter below still removes malformed consecutive turns.
-        val cleanPrior = priorHistory.takeLast(20)
+        // Extract clean alternating turns from prior history (up to last 8 messages)
+        val cleanPrior = priorHistory.takeLast(8)
         var expectedSender = MessageSender.USER
         for (msg in cleanPrior) {
             if (msg.sender == expectedSender && msg.text.isNotBlank()) {
