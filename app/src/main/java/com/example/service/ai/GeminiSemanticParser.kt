@@ -105,7 +105,8 @@ class GeminiSemanticParser {
                - "سه روز دیگه" / "سه روز بعد" / "3 روز دیگر" -> MUST set: targetJalaliYear=${threeDaysLaterJalali.year}, targetJalaliMonth=${threeDaysLaterJalali.month}, targetJalaliDay=${threeDaysLaterJalali.day}.
                - For any other explicit "N روز دیگر/بعد/دیگه", calculate the date by adding exactly N calendar days to TODAY; never reinterpret a multi-day offset as tomorrow.
             3. Hour Resolution:
-               - If user specifies an hour like "ساعت ۳" without morning/night, for reminders and appointments assume daytime 15:00 (targetHour: 15, targetMinute: 0).
+               - NEVER guess morning or evening when the user says an hour from 1 to 11 without a period.
+               - In that case set isAmbiguous=true, preserve the stated hour in targetHour, and ask a concise clarification such as "منظورتان ساعت ۱۰ صبح است یا ۱۰ شب؟".
                - "ساعت ۳ بعدازظهر" / "ساعت ۳ عصر" -> targetHour: 15, targetMinute: 0.
                - "ساعت ۳ صبح" / "۳ بامداد" -> targetHour: 3, targetMinute: 0.
                - "ساعت ۹ صبح" -> targetHour: 9, targetMinute: 0.
