@@ -382,22 +382,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Check if clarification is needed on any extracted task
             val taskNeedingClarification = parsedList.firstOrNull { it.needsClarification }
             if (taskNeedingClarification != null) {
-                val clarificationType = if (!taskNeedingClarification.hasExplicitTime && !taskNeedingClarification.hasExplicitDate) {
+                val clarificationType = if (
+                    !taskNeedingClarification.hasExplicitTime ||
+                    (!taskNeedingClarification.hasExplicitDate && !taskNeedingClarification.hasResolvedRelativeDateTime)
+                ) {
                     ClarificationType.MISSING_TIME_OR_DATE
                 } else {
                     ClarificationType.MISSING_TITLE
                 }
 
-                val question = if (clarificationType == ClarificationType.MISSING_TIME_OR_DATE) {
-                    "ساعت یا تاریخ برای یادآوری «${taskNeedingClarification.title}» مشخص نشده است؛ مایلید چه زمانی یادآوری شود؟"
-                } else {
-                    "زمان یادآوری روی ${taskNeedingClarification.jalaliDateText} ساعت ${taskNeedingClarification.timeText} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
+                val missingDate = !taskNeedingClarification.hasExplicitDate &&
+                    !taskNeedingClarification.hasResolvedRelativeDateTime
+                val missingTime = !taskNeedingClarification.hasExplicitTime
+                val question = when {
+                    missingDate && missingTime -> "تاریخ و ساعت یادآوری «${taskNeedingClarification.title}» مشخص نشده است؛ چه روز و ساعتی مدنظرتان است؟"
+                    missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «${taskNeedingClarification.title}» چه روزی باشد؟"
+                    missingTime -> "تاریخ مشخص است؛ یادآوری «${taskNeedingClarification.title}» را چه ساعتی تنظیم کنم؟"
+                    else -> "لطفاً عنوان یا موضوع این یادآوری را بفرمایید."
                 }
 
-                val suggestions = if (clarificationType == ClarificationType.MISSING_TIME_OR_DATE) {
-                    listOf("نیم ساعت دیگر", "۱ ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ۹ صبح", "پس‌فردا ساعت ۱۵:۰۰")
-                } else {
-                    listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
+                val suggestions = when {
+                    missingDate && missingTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+                    missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+                    missingTime -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+                    else -> listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
                 }
 
                 val prompt = ClarificationPrompt(
@@ -432,33 +440,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updatedTask: ParsedTask = when (prompt.type) {
             ClarificationType.MISSING_TIME_OR_DATE -> {
                 val extracted = PersianDateEngine.extractPersianTask(cleanResponse)
-                if (!extracted.hasExplicitTime && !extracted.hasExplicitDate) {
-                    val followUp = "هنوز تاریخ یا زمان مشخصی در پاسخ شما پیدا نکردم. لطفاً مثلاً بگویید «فردا ساعت ۹ صبح» یا «نیم ساعت دیگر»."
-                    val updatedPrompt = prompt.copy(
-                        question = followUp,
-                        quickSuggestions = listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
-                    )
+                val relativePhrase = extracted.rawTimePhrase
+                val resolvedRelativeDateTime =
+                    (relativePhrase.contains("دقیقه") || relativePhrase.contains("ساعت")) &&
+                    (relativePhrase.contains("دیگه") || relativePhrase.contains("بعد") || relativePhrase.contains("دیگر"))
+                val extractedHasDate = extracted.hasExplicitDate || resolvedRelativeDateTime
+                val hasDate = tentative.hasExplicitDate || extractedHasDate
+                val hasTime = tentative.hasExplicitTime || extracted.hasExplicitTime
+
+                val mergedCalendar = Calendar.getInstance().apply {
+                    timeInMillis = tentative.triggerTimestamp
+                }
+                val answerCalendar = Calendar.getInstance().apply {
+                    timeInMillis = extracted.triggerTimestamp
+                }
+                if (extractedHasDate) {
+                    mergedCalendar.set(Calendar.YEAR, answerCalendar.get(Calendar.YEAR))
+                    mergedCalendar.set(Calendar.MONTH, answerCalendar.get(Calendar.MONTH))
+                    mergedCalendar.set(Calendar.DAY_OF_MONTH, answerCalendar.get(Calendar.DAY_OF_MONTH))
+                }
+                if (extracted.hasExplicitTime) {
+                    mergedCalendar.set(Calendar.HOUR_OF_DAY, answerCalendar.get(Calendar.HOUR_OF_DAY))
+                    mergedCalendar.set(Calendar.MINUTE, answerCalendar.get(Calendar.MINUTE))
+                    mergedCalendar.set(Calendar.SECOND, 0)
+                    mergedCalendar.set(Calendar.MILLISECOND, 0)
+                }
+
+                val mergedTimestamp = mergedCalendar.timeInMillis
+                val j = PersianDateEngine.timestampToJalali(mergedTimestamp)
+                val mergedTask = tentative.copy(
+                    triggerTimestamp = mergedTimestamp,
+                    jalaliDateText = j.formatPersianNumeric(),
+                    timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+                    hasExplicitTime = hasTime,
+                    hasExplicitDate = hasDate,
+                    clarificationQuestion = null,
+                    isAmbiguous = false
+                )
+
+                if (!hasDate || !hasTime) {
+                    val followUp = when {
+                        !hasDate && !hasTime -> "هنوز تاریخ و ساعت مشخص نشده است؛ لطفاً هر دو را بگویید، مثلاً «فردا ساعت ۹ صبح»."
+                        !hasDate -> "ساعت ثبت شد؛ تاریخ یادآوری چه روزی باشد؟"
+                        else -> "تاریخ ثبت شد؛ یادآوری را چه ساعتی تنظیم کنم؟"
+                    }
+                    val suggestions = when {
+                        !hasDate && !hasTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+                        !hasDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+                        else -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+                    }
                     _uiState.value = _uiState.value.copy(
-                        activeClarification = updatedPrompt,
+                        activeClarification = prompt.copy(
+                            question = followUp,
+                            tentativeTask = mergedTask,
+                            quickSuggestions = suggestions
+                        ),
                         infoMessage = followUp
                     )
                     ttsSpeaker.speak(followUp)
                     return
                 }
-                val newTimestamp = extracted.triggerTimestamp
-                val j = PersianDateEngine.timestampToJalali(newTimestamp)
-                val timeStr = PersianDateEngine.formatPersianTime(j.hour, j.minute)
-                val dateStr = j.formatPersianNumeric()
 
-                tentative.copy(
-                    triggerTimestamp = newTimestamp,
-                    jalaliDateText = dateStr,
-                    timeText = timeStr,
-                    hasExplicitTime = extracted.hasExplicitTime,
-                    hasExplicitDate = extracted.hasExplicitDate,
-                    clarificationQuestion = null,
-                    isAmbiguous = false
-                )
+                if (!mergedTask.hasExplicitTitle) {
+                    val titlePrompt = "زمان یادآوری مشخص شد؛ لطفاً عنوان یا موضوع آن را بفرمایید:"
+                    _uiState.value = _uiState.value.copy(
+                        activeClarification = ClarificationPrompt(
+                            type = ClarificationType.MISSING_TITLE,
+                            question = titlePrompt,
+                            tentativeTask = mergedTask,
+                            quickSuggestions = listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
+                        ),
+                        infoMessage = titlePrompt
+                    )
+                    ttsSpeaker.speak(titlePrompt)
+                    return
+                }
+                mergedTask
             }
             ClarificationType.MISSING_TITLE -> {
                 val cleanTitle = PersianDateEngine.extractPersianTask(cleanResponse).title
