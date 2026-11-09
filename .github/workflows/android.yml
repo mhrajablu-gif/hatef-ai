@@ -47,8 +47,20 @@ jobs:
       - name: Make Gradle Wrapper Executable
         run: chmod +x ./gradlew
 
-      - name: Build APK
-        run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
+      - name: Build APK (retry transient Gradle download failures)
+        run: |
+          for attempt in 1 2 3; do
+            echo "Gradle build attempt ${attempt}/3"
+            if ./gradlew :app:assembleDebug --stacktrace --no-daemon; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Build failed; waiting 20 seconds before retry."
+              sleep 20
+            fi
+          done
+          echo "Gradle build failed after 3 attempts."
+          exit 1
 
       - name: Verify APK Output
         run: |
