@@ -548,25 +548,35 @@ object PersianCommandAnalyzer {
         var reqWeekday: String? = null
         var phrase = ""
 
-        // 1. "پس اون فردا" / "3 روز دیگر"
-        if (clean.contains("پس اون فردا") || clean.contains("پس‌اون‌فردا") || clean.contains("3 روز دیگر") || clean.contains("3 روز دیگه")) {
+        // Relative calendar days: support digits and spoken Persian numbers
+        // e.g. "3 روز دیگه", "سه روز بعد", "بیست و سه روز دیگر".
+        val relativeDaysPattern = Regex(
+            """(?:^|[^\\p{L}\\p{N}])((?:\\d{1,3}|یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد)(?:\\s*و\\s*(?:یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده))?)\\s*روز\\s*(دیگه|بعد|دیگر)(?=$|[^\\p{L}\\p{N}])"""
+        )
+        val relativeDaysMatch = relativeDaysPattern.find(clean)
+        val spokenDayOffset = relativeDaysMatch?.let {
+            parsePersianNumber(it.groupValues[1])
+        }?.takeIf { it in 1..365 }
+
+        if (relativeDaysMatch != null && spokenDayOffset != null) {
+            dayOffset = spokenDayOffset
+            phrase = relativeDaysMatch.value.trim()
+        } else if (clean.contains("پس اون فردا") || clean.contains("پس‌اون‌فردا")) {
             dayOffset = 3
-            phrase = "پس اون فردا"
-        }
-        // 2. "پس فردا" / "پس‌فردا" / "پسفردا" / "2 روز دیگر"
-        else if (clean.contains("پس فردا") || clean.contains("پس‌فردا") || clean.contains("پسفردا") || clean.contains("2 روز دیگر") || clean.contains("2 روز دیگه")) {
+            phrase = if (clean.contains("پس‌اون‌فردا")) "پس‌اون‌فردا" else "پس اون فردا"
+        } else if (clean.contains("پس فردا") || clean.contains("پس‌فردا") || clean.contains("پسفردا")) {
             dayOffset = 2
-            phrase = "پس‌فردا"
-        }
-        // 3. "فردا" / "1 روز دیگر"
-        else if (clean.contains("فردا") || clean.contains("1 روز دیگر") || clean.contains("1 روز دیگه")) {
+            phrase = when {
+                clean.contains("پس‌فردا") -> "پس‌فردا"
+                clean.contains("پسفردا") -> "پسفردا"
+                else -> "پس فردا"
+            }
+        } else if (clean.contains("فردا")) {
             dayOffset = 1
             phrase = "فردا"
-        }
-        // 4. "امروز" / "امشب"
-        else if (clean.contains("امروز") || clean.contains("امشب")) {
+        } else if (clean.contains("امروز") || clean.contains("امشب")) {
             dayOffset = 0
-            phrase = "امروز"
+            phrase = if (clean.contains("امشب")) "امشب" else "امروز"
         }
 
         // 5. Weekdays matching ordered by length descending to prevent "شنبه" matching inside compound words
@@ -659,6 +669,29 @@ object PersianCommandAnalyzer {
             requestedWeekday = reqWeekday,
             matchedPhrase = phrase
         )
+    }
+
+    private fun parsePersianNumber(raw: String): Int? {
+        val normalized = PersianDateEngine.toEnglishDigits(raw).trim()
+        normalized.toIntOrNull()?.let { return it }
+
+        val values = mapOf(
+            "یک" to 1, "یه" to 1, "دو" to 2, "سه" to 3, "چهار" to 4,
+            "پنج" to 5, "شش" to 6, "شیش" to 6, "هفت" to 7, "هشت" to 8,
+            "نه" to 9, "ده" to 10, "یازده" to 11, "دوازده" to 12,
+            "سیزده" to 13, "چهارده" to 14, "پانزده" to 15, "پونزده" to 15,
+            "شانزده" to 16, "شونزده" to 16, "هفده" to 17, "هجده" to 18,
+            "نوزده" to 19, "بیست" to 20, "سی" to 30, "چهل" to 40,
+            "پنجاه" to 50, "شصت" to 60, "هفتاد" to 70, "هشتاد" to 80,
+            "نود" to 90, "صد" to 100
+        )
+        val parts = normalized.split(Regex("""\\s*و\\s*""")).filter { it.isNotBlank() }
+        if (parts.isEmpty()) return null
+        var total = 0
+        for (part in parts) {
+            total += values[part] ?: return null
+        }
+        return total
     }
 
     private fun normalizeWeekday(weekday: String): String {
