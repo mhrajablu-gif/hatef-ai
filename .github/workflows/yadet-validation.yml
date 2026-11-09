@@ -27,6 +27,18 @@ jobs:
           java-version: "21"
           cache: gradle
 
+      - name: Restore or generate debug keystore
+        shell: bash
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+            echo "Restored debug.keystore from repository backup."
+          else
+            keytool -genkeypair -alias androiddebugkey -keypass android -keystore debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+            echo "Generated temporary debug.keystore for CI."
+          fi
+          test -s debug.keystore
+
       - name: Prepare Gradle
         run: chmod +x ./gradlew
 
