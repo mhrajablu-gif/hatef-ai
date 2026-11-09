@@ -562,11 +562,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissClarification() {
         val prompt = _uiState.value.activeClarification ?: return
-        val current = _uiState.value.parsedTasksPreview.toMutableList()
-        current.add(0, prompt.tentativeTask)
         _uiState.value = _uiState.value.copy(
             activeClarification = null,
-            parsedTasksPreview = current
+            infoMessage = "یادآور «${prompt.tentativeTask.title}» به‌دلیل ناقص بودن اطلاعات ثبت نشد."
         )
     }
 
