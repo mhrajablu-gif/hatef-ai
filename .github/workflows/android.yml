@@ -49,6 +49,23 @@ jobs:
             echo "Created .env from .env.example"
           fi
 
+      - name: Restore Firebase configuration
+        shell: bash
+        env:
+          FIREBASE_GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$FIREBASE_GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON" > app/google-services.json
+            echo "Restored Firebase configuration from GitHub Actions secret."
+          elif [ -f "app/google-services.json" ]; then
+            echo "Firebase configuration file is present."
+          else
+            echo "::error::Firebase configuration is missing. Configure FIREBASE_GOOGLE_SERVICES_JSON before building an APK."
+            exit 1
+          fi
+          python -m json.tool app/google-services.json > /dev/null
+          test -s app/google-services.json
+
       - name: Make Gradle Wrapper Executable
         run: chmod +x ./gradlew
 
