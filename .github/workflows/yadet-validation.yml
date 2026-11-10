@@ -58,8 +58,11 @@ jobs:
           elif [ -f "app/google-services.json" ]; then
             echo "Firebase configuration file is present."
           else
-            echo "::warning::Firebase configuration is missing. Add the multiline JSON file as the FIREBASE_GOOGLE_SERVICES_JSON repository secret. The APK may compile, but Firebase AI Logic cannot be assumed to initialize."
+            echo "::error::Firebase configuration is missing. Configure the FIREBASE_GOOGLE_SERVICES_JSON repository secret before building an APK."
+            exit 1
           fi
+          python -m json.tool app/google-services.json > /dev/null
+          test -s app/google-services.json
 
       - name: Run unit tests and build debug APK (retry transient Gradle download failures)
         shell: bash
