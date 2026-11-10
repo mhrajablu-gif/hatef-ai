@@ -48,6 +48,8 @@ class ReminderReceiver : BroadcastReceiver() {
             AlarmScheduler.ACTION_COMPLETE_REMINDER -> {
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.cancel(reminderId.toInt())
+                // Completing from an advance-alert notification must also cancel the main alarm.
+                AlarmScheduler.cancelReminder(context, reminderId)
 
                 val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
