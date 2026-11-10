@@ -720,7 +720,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 triggerTimestamp = newMillis,
                 jalaliDateText = dateStr,
                 timeText = timeStr,
-                isCompleted = false
+                isCompleted = false,
+                completedAt = null
             )
             repository.update(updated)
             val result = AlarmScheduler.scheduleReminder(context, updated)
