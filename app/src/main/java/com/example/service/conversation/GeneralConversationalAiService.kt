@@ -3,7 +3,7 @@ package com.example.service.conversation
 import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
-import com.google.firebase.ai.GenerativeBackend
+import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.FirebaseApp
 import com.example.service.ai.readDebugAppCheckToken
 import com.google.firebase.ai.type.content
