@@ -28,7 +28,7 @@ class ReminderReceiver : BroadcastReceiver() {
         private fun channelIdForSound(soundUri: Uri): String {
             val digest = java.security.MessageDigest.getInstance("SHA-256")
                 .digest(soundUri.toString().toByteArray(Charsets.UTF_8))
-            return CHANNEL_PREFIX + digest.take(8).joinToString("") { "%02x".format(it) }
+            return CHANNEL_PREFIX + digest.take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
         }
     }
 
