@@ -73,10 +73,22 @@ class GeneralConversationalAiService {
         // Some HTTP failures return Google's complete HTML error page. Never show markup/CSS
         // in a chat bubble; reduce it to a readable status/detail while retaining useful codes.
         val technicalDetail = sanitizeTechnicalDetail(rawTechnicalDetail).take(500)
-        val looksLikeAppCheckFailure = technicalDetail.contains("app check", ignoreCase = true) ||
+        // A generic HTTP 403 is NOT proof of an App Check failure. Firebase AI Logic
+        // can return 403 when the Firebase API key belongs to another project, the
+        // Firebase AI Logic API is disabled, or the key's API allowlist blocks it.
+        // Only classify explicit App Check / attestation messages as App Check failures.
+        val looksLikeAppCheckFailure =
+            technicalDetail.contains("app check", ignoreCase = true) ||
+            technicalDetail.contains("appcheck", ignoreCase = true) ||
+            technicalDetail.contains("attestation", ignoreCase = true) ||
+            technicalDetail.contains("debug token", ignoreCase = true)
+
+        val isForbiddenAccessFailure =
             technicalDetail.contains("403") ||
+            technicalDetail.contains("forbidden", ignoreCase = true) ||
             technicalDetail.contains("PERMISSION_DENIED", ignoreCase = true) ||
-            technicalDetail.contains("attestation", ignoreCase = true)
+            technicalDetail.contains("does not have permission", ignoreCase = true) ||
+            technicalDetail.contains("requests to this api", ignoreCase = true)
         val debugToken = if (looksLikeAppCheckFailure) {
             try {
                 readDebugAppCheckToken(FirebaseApp.getInstance().applicationContext)
@@ -87,6 +99,10 @@ class GeneralConversationalAiService {
 
         if (looksLikeAppCheckFailure && !debugToken.isNullOrBlank()) {
             return "درخواست هوش مصنوعی توسط امنیت Firebase (App Check) رد شده است. توکن آزمایشی این نصب را در Firebase Console، بخش App Check و قسمت Manage debug tokens برای همین برنامه ثبت کنید؛ سپس برنامه را دوباره باز کنید.\n\nتوکن این نصب:\n$debugToken\n\nجزئیات خطا: $technicalDetail"
+        }
+
+        if (isForbiddenAccessFailure) {
+            return "دسترسی Firebase AI Logic به Gemini با خطای 403 رد شده است؛ این پیام به‌تنهایی به معنی مشکل App Check نیست. باید مطمئن شویم فایل google-services.json متعلق به همان پروژه Firebase با شناسه yadet-ai است، APIهای Firebase AI Logic (firebasevertexai.googleapis.com) و Gemini Developer API (generativelanguage.googleapis.com) فعال‌اند و API key برنامه اجازه فراخوانی Firebase AI Logic API را دارد. پس از اصلاح تنظیمات پروژه، نیازی به پاک‌کردن اطلاعات یا یادآورها نیست؛ برنامه را دوباره اجرا کنید."
         }
 
         // Report transient Gemini capacity/rate-limit failures accurately instead of blaming Firebase.
