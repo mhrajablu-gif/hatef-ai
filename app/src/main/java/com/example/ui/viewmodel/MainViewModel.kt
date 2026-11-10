@@ -624,7 +624,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmAllPreviewTasks() {
         viewModelScope.launch {
             val context = getApplication<Application>()
-            for (task in _uiState.value.parsedTasksPreview) {
+            val scheduleResults = mutableListOf<com.example.service.alarm.AlarmScheduleResult>()
+            val tasksToSave = _uiState.value.parsedTasksPreview.toList()
+            for (task in tasksToSave) {
                 val entity = ReminderEntity(
                     title = task.title,
                     description = task.description,
@@ -637,12 +639,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     advanceAlertMinutes = task.advanceAlertMinutes
                 )
                 val id = repository.insert(entity)
-                AlarmScheduler.scheduleReminder(context, entity.copy(id = id))
+                scheduleResults += AlarmScheduler.scheduleReminder(context, entity.copy(id = id))
+            }
+            val scheduledCount = scheduleResults.count { it == com.example.service.alarm.AlarmScheduleResult.SCHEDULED }
+            val failedCount = scheduleResults.size - scheduledCount
+            val statusMessage = if (failedCount == 0) {
+                "تمام ${scheduleResults.size} یادآوری ذخیره و زمان‌بندی شدند."
+            } else {
+                "${scheduleResults.size} یادآوری ذخیره شد؛ زمان‌بندی آلارم ${scheduledCount} مورد موفق بود و ${failedCount} مورد نیاز به بررسی دارد. مجوز هشدارهای دقیق را بررسی کنید."
             }
             _uiState.value = _uiState.value.copy(
                 parsedTasksPreview = emptyList(),
                 isVoiceSheetOpen = false,
-                infoMessage = "تمام یادآوری‌ها با موفقیت ثبت شدند."
+                infoMessage = statusMessage
             )
         }
     }
