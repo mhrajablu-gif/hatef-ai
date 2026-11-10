@@ -607,13 +607,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val id = repository.insert(entity)
-            AlarmScheduler.scheduleReminder(context, entity.copy(id = id))
+            val scheduleResult = AlarmScheduler.scheduleReminder(context, entity.copy(id = id))
 
             // Remove confirmed from preview
             val updated = _uiState.value.parsedTasksPreview.filter { it != task }
             _uiState.value = _uiState.value.copy(
                 parsedTasksPreview = updated,
-                infoMessage = "یادآوری «${entity.title}» با موفقیت ثبت شد."
+                infoMessage = if (scheduleResult == com.example.service.alarm.AlarmScheduleResult.SCHEDULED) "یادآوری «${entity.title}» ذخیره و زمان‌بندی شد." else "یادآوری ذخیره شد، اما آلارم زمان‌بندی نشد. مجوز هشدارها را بررسی کنید."
             )
             if (updated.isEmpty()) {
                 _uiState.value = _uiState.value.copy(isVoiceSheetOpen = false)
@@ -663,13 +663,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val context = getApplication<Application>()
             if (reminder.id == 0L) {
                 val id = repository.insert(reminder)
-                AlarmScheduler.scheduleReminder(context, reminder.copy(id = id))
-                _uiState.value = _uiState.value.copy(infoMessage = "یادآوری جدید ثبت شد.")
+                val result = AlarmScheduler.scheduleReminder(context, reminder.copy(id = id))
+                _uiState.value = _uiState.value.copy(infoMessage = if (result == com.example.service.alarm.AlarmScheduleResult.SCHEDULED) "یادآوری جدید ذخیره و زمان‌بندی شد." else "یادآوری ذخیره شد، اما آلارم زمان‌بندی نشد؛ مجوز هشدارها را بررسی کنید.")
             } else {
                 repository.update(reminder)
                 AlarmScheduler.cancelReminder(context, reminder.id)
-                AlarmScheduler.scheduleReminder(context, reminder)
-                _uiState.value = _uiState.value.copy(infoMessage = "تغییرات ذخیره شد.")
+                val result = AlarmScheduler.scheduleReminder(context, reminder)
+                _uiState.value = _uiState.value.copy(infoMessage = if (result == com.example.service.alarm.AlarmScheduleResult.SCHEDULED) "تغییرات ذخیره و آلارم زمان‌بندی شد." else "تغییرات ذخیره شد، اما آلارم زمان‌بندی نشد.")
             }
             com.example.widget.TodayTasksWidgetReceiver.updateAllWidgets(context)
             closeAddDialog()
@@ -714,9 +714,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isCompleted = false
             )
             repository.update(updated)
-            AlarmScheduler.scheduleReminder(context, updated)
+            val result = AlarmScheduler.scheduleReminder(context, updated)
             com.example.widget.TodayTasksWidgetReceiver.updateAllWidgets(context)
-            _uiState.value = _uiState.value.copy(infoMessage = "یادآوری به ${addedMinutes} دقیقه بعد موکول شد.")
+            _uiState.value = _uiState.value.copy(infoMessage = if (result == com.example.service.alarm.AlarmScheduleResult.SCHEDULED) "یادآوری به ${addedMinutes} دقیقه بعد موکول و زمان‌بندی شد." else "زمان یادآوری ذخیره شد، اما آلارم زمان‌بندی نشد.")
         }
     }
 
