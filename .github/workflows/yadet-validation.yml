@@ -90,3 +90,5 @@ jobs:
           path: app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
           retention-days: 14
+
+# Trigger validation after Firebase configuration secret setup.
