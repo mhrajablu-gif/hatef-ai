@@ -239,6 +239,8 @@ class FullScreenAlarmActivity : ComponentActivity() {
         if (reminderId <= 0) return
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // Stop both the main and advance alarms when the user completes from full-screen UI.
+                AlarmScheduler.cancelReminder(applicationContext, reminderId)
                 val db = AppDatabase.getDatabase(applicationContext)
                 db.reminderDao().setCompleted(reminderId, true, System.currentTimeMillis())
             } catch (e: Exception) {
@@ -251,6 +253,8 @@ class FullScreenAlarmActivity : ComponentActivity() {
         if (reminderId <= 0) return
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // Remove stale main/advance alarms before writing the snoozed schedule.
+                AlarmScheduler.cancelReminder(applicationContext, reminderId)
                 val db = AppDatabase.getDatabase(applicationContext)
                 val reminder = db.reminderDao().getReminderById(reminderId)
                 if (reminder != null) {
@@ -262,7 +266,8 @@ class FullScreenAlarmActivity : ComponentActivity() {
                         triggerTimestamp = newTrigger,
                         jalaliDateText = dateStr,
                         timeText = timeStr,
-                        isCompleted = false
+                        isCompleted = false,
+                        completedAt = null
                     )
                     db.reminderDao().update(updated)
                     AlarmScheduler.scheduleReminder(applicationContext, updated)
