@@ -231,7 +231,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun sendChatMessage(text: String) {
         val clean = text.trim()
-        if (clean.isBlank()) return
+        if (clean.isBlank() || _uiState.value.isAiParsing) return
 
         val userMsg = com.example.service.conversation.ChatMessage(
             sender = com.example.service.conversation.MessageSender.USER,
@@ -242,31 +242,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
-            val response = conversationalEngine.processTurn(
-                userInput = clean,
-                currentState = _conversationState.value,
-                recentHistory = updatedHistory
-            )
+            try {
+                val response = kotlinx.coroutines.withTimeout(45_000L) {
+                    conversationalEngine.processTurn(
+                        userInput = clean,
+                        currentState = _conversationState.value,
+                        recentHistory = updatedHistory
+                    )
+                }
 
-            _conversationState.value = response.newState
-
-            val assistantMsg = com.example.service.conversation.ChatMessage(
-                sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                text = response.replyText,
-                actionCard = response.actionCard,
-                suggestedReplies = response.suggestedReplies
-            )
-
-            _chatMessages.value = _chatMessages.value + assistantMsg
-            _uiState.value = _uiState.value.copy(isAiParsing = false)
-
-            // Speak response via TTS
-            ttsSpeaker.speak(response.replyText)
-
-            if (response.executedResult != null && response.executedResult.success) {
-                _uiState.value = _uiState.value.copy(
-                    infoMessage = response.executedResult.message
+                _conversationState.value = response.newState
+                val assistantMsg = com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = response.replyText,
+                    actionCard = response.actionCard,
+                    suggestedReplies = response.suggestedReplies
                 )
+                _chatMessages.value = _chatMessages.value + assistantMsg
+                ttsSpeaker.speak(response.replyText)
+
+                if (response.executedResult != null && response.executedResult.success) {
+                    _uiState.value = _uiState.value.copy(
+                        infoMessage = response.executedResult.message
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Chat turn failed", e)
+                val errorMessage = when {
+                    e is kotlinx.coroutines.TimeoutCancellationException ->
+                        "پاسخ‌گویی بیش از حد طول کشید و درخواست متوقف شد. لطفاً دوباره تلاش کنید."
+                    else ->
+                        "در پردازش پیام مشکلی پیش آمد. لطفاً دوباره تلاش کنید."
+                }
+                _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = errorMessage
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(isAiParsing = false)
             }
         }
     }
