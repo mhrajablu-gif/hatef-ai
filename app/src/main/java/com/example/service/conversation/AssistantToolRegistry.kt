@@ -371,13 +371,18 @@ class AssistantToolRegistry(
         return try {
             repository.update(updated)
             AlarmScheduler.cancelReminder(context, id)
-            if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
+            val scheduleResult = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
                 AlarmScheduler.scheduleReminder(context, updated)
-            }
-            val alertDesc = if (advanceAlertMinutes > 0) {
-                "پیش‌اعلان $advanceAlertMinutes دقیقه قبل برای «${updated.title}» فعال شد."
             } else {
-                "پیش‌اعلان یادآور «${updated.title}» غیرفعال شد."
+                com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE
+            }
+            val alertDesc = when (scheduleResult) {
+                com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> if (advanceAlertMinutes > 0) "پیش‌اعلان $advanceAlertMinutes دقیقه قبل برای «${updated.title}» فعال و آلارم زمان‌بندی شد." else "پیش‌اعلان یادآور «${updated.title}» غیرفعال و آلارم اصلی زمان‌بندی شد."
+                com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED -> "تنظیمات پیش‌اعلان ذخیره شد، اما فقط بخشی از آلارم‌های «${updated.title}» زمان‌بندی شد."
+                com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED -> "تنظیمات ذخیره شد، اما مجوز هشدار دقیق فعال نیست و آلارم «${updated.title}» تنظیم نشد."
+                com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE -> "تنظیمات ذخیره شد؛ این یادآور تکمیل‌شده یا موعدگذشته است و آلارم فعالی ندارد."
+                com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+                com.example.service.alarm.AlarmScheduleResult.FAILED -> "تنظیمات ذخیره شد، اما زمان‌بندی آلارم «${updated.title}» ناموفق بود."
             }
             ToolResult(
                 success = true,
