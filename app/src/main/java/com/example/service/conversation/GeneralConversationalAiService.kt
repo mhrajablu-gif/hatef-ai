@@ -196,7 +196,7 @@ class GeneralConversationalAiService {
      * Local offline Persian conversational and knowledge fallback covering
      * technology, science, productivity, health, psychology, and general reasoning.
      */
-    fun getOfflineKnowledgeReply(input: String): String {
+    fun getOfflineKnowledgeReply(input: String): String? {
         val direct = checkDirectAdvisoryOrRoutine(input)
         if (direct != null) return direct
 
@@ -261,8 +261,7 @@ class GeneralConversationalAiService {
             lower.contains("کی هستی") || lower.contains("چه کارهایی بلدی") || lower == "راهنما" || lower.contains("راهنمای برنامه") || lower.contains("راهنمای استفاده") ->
                 "من «یادت» هستم؛ دستیار هوشمند شما با قابلیت‌های جامع:\n۱. پاسخ به پرسش‌های عمومی، علمی، فناوری، برنامه‌ریزی و ایده‌پردازی به زبان فارسی.\n۲. مدیریت هوشمند تمام قرارها و یادآورها: ثبت، حذف تک‌تک یا همگی («همه رو حذف کن»)، جابجایی («ساعت رو بکن ۱۰»)، و جلو/عقب انداختن.\n۳. تغییر تنظیمات برنامه با فرمان صوتی یا متنی («تم رو تاریک کن»، «پیش‌اعلان رو بکن ۳۰ دقیقه»).\n۴. حافظه بلندمدت برای به خاطر سپردن عادات و ساعات خواب و بیداری شما."
 
-            else ->
-                "در حال حاضر به مدل هوشمند آنلاین دسترسی ندارم و پاسخ آفلاین آماده‌ای هم برای این پرسش ندارم. نمی‌خواهم وانمود کنم سؤال شما را بررسی کرده‌ام یا پاسخ ساختگی بدهم. لطفاً اتصال اینترنت و تنظیمات اتصال هوش مصنوعی برنامه را بررسی کنید و دوباره تلاش کنید."
+            else -> null
         }
     }
 }
