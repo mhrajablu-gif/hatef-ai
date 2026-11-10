@@ -63,7 +63,25 @@ class ConversationalAiEngine(
             return handleCorrection(cleanInput, currentState, referenceTimeMillis, timeZone)
         }
 
-        // 3. Check for casual conversation / chit-chat / greetings ("سلام، حالت چطوره؟")
+        // 3. Route greetings and small talk to Gemini so replies are contextual, not canned.
+        if (isGreetingOrSmallTalk(cleanInput)) {
+            val reply = generalAiService.generateChatReply(
+                userMessage = cleanInput,
+                recentHistory = recentHistory,
+                userContextSummary = toolRegistry?.getUserMemoryPreferences()?.message
+            )
+            return ConversationalResponse(
+                replyText = reply,
+                newState = currentState.copy(
+                    activeIntent = ConversationIntent.GREETING_OR_CHITCHAT,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                ),
+                suggestedReplies = emptyList()
+            )
+        }
+
+        // Keep only fixed identity/help responses local; ordinary conversation belongs to Gemini.
         val chitChatReply = checkChitChatOrGreeting(cleanInput)
         if (chitChatReply != null) {
             return ConversationalResponse(
@@ -1531,14 +1549,21 @@ class ConversationalAiEngine(
         return negatives.any { lower == it || (lower.startsWith(it) && lower.length <= 10) }
     }
 
+    private fun isGreetingOrSmallTalk(input: String): Boolean {
+        val normalized = input.lowercase()
+            .replace("ي", "ی")
+            .replace("ك", "ک")
+            .trim()
+        val greetingTerms = listOf(
+            "سلام", "درود", "صبح بخیر", "عصر بخیر", "شب بخیر",
+            "حالت چطوره", "حالت چطوری", "چطوری", "خوبی", "چه خبر",
+            "چه خبرا", "روزت بخیر", "وقت بخیر"
+        )
+        return greetingTerms.any { normalized.contains(it) }
+    }
+
     private fun checkChitChatOrGreeting(input: String): Pair<String, List<String>>? {
         val lower = input.lowercase().trim()
-        if (lower.startsWith("سلام") || lower.startsWith("درود") || lower.contains("صبح بخیر") || lower.contains("عصر بخیر") || lower.contains("شب بخیر")) {
-            return Pair("سلام! من یادت، دستیار هوشمند شما هستم. چطور می‌تونم کمکتون کنم؟", listOf("فردا ساعت ۱۰ یادم بنداز برم بانک", "چه یادآورهایی دارم؟"))
-        }
-        if (lower.contains("چطوری") || lower.contains("حالت چطوره") || lower.contains("خوبی")) {
-            return Pair("ممنون، حالم عالیه! آماده‌ام تا برای کارهاتون یادآوری تنظیم کنم یا با هم درباره موضوعات مختلف گفتگو کنیم.", listOf("یادآور جدید", "یادآورهای امروز"))
-        }
         if (lower.contains("کی هستی") || lower.contains("چه کارهایی بلدی") || lower.contains("راهنما")) {
             return Pair("من دستیار هوشمند یادت (Yadet) هستم. شما می‌توانید:\n۱. درباره مسائل روزمره، علمی، یادگیری، فناوری، تندرستی و برنامه‌ریزی با من مشورت و گفتگو کنید.\n۲. قرارها و یادآوری‌هایتان را به فارسی محاوره‌ای ثبت، ویرایش، حذف یا تکرار کنید.\n۳. تنظیمات برنامه مانند پیش‌اعلان و تم را با فرمان صوتی تغییر دهید.", listOf("فردا ۱۰ صبح یادم بنداز", "یک ربع دیگه یادم بنداز"))
         }
