@@ -89,6 +89,22 @@ class GeneralConversationalAiService {
             return "درخواست هوش مصنوعی توسط امنیت Firebase (App Check) رد شده است. توکن آزمایشی این نصب را در Firebase Console، بخش App Check و قسمت Manage debug tokens برای همین برنامه ثبت کنید؛ سپس برنامه را دوباره باز کنید.\n\nتوکن این نصب:\n$debugToken\n\nجزئیات خطا: $technicalDetail"
         }
 
+        // Report transient Gemini capacity/rate-limit failures accurately instead of blaming Firebase.
+        val lowerTechnicalDetail = technicalDetail.lowercase()
+        val isHighDemand = lowerTechnicalDetail.contains("high demand") ||
+            lowerTechnicalDetail.contains("overloaded") ||
+            lowerTechnicalDetail.contains("503") ||
+            lowerTechnicalDetail.contains("service unavailable")
+        if (isHighDemand) {
+            return "سرویس Gemini در حال حاضر به‌دلیل حجم زیاد درخواست‌ها موقتاً پاسخ‌گو نیست. این خطا از شلوغی موقت سرویس است، نه لزوماً از اینترنت یا تنظیمات Firebase. لطفاً کمی بعد دوباره تلاش کنید."
+        }
+        val isRateLimited = lowerTechnicalDetail.contains("429") ||
+            lowerTechnicalDetail.contains("resource_exhausted") ||
+            lowerTechnicalDetail.contains("quota")
+        if (isRateLimited) {
+            return "درخواست‌های Gemini فعلاً به محدودیت تعداد درخواست یا سهمیه رسیده‌اند. کمی صبر کنید و دوباره امتحان کنید؛ اگر این وضعیت ادامه داشت، باید محدودیت مدل و سهمیهٔ پروژه بررسی شود."
+        }
+
         // If the failure is not an App Check rejection, use a relevant offline answer when available.
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
         if (offlineFallback != null) {
