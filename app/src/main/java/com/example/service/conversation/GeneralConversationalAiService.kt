@@ -63,14 +63,16 @@ class GeneralConversationalAiService {
 
         // Diagnose security failures before offline fallback: the fallback always returns a string.
         Log.e(TAG, "Online Gemini AI communication failed: ${lastException?.message}", lastException)
-        val technicalDetail = lastException?.let { error ->
+        val rawTechnicalDetail = lastException?.let { error ->
             generateSequence(error as Throwable?) { it.cause }
                 .mapNotNull { it.message?.trim()?.takeIf { message -> message.isNotBlank() } }
                 .distinct()
                 .take(3)
                 .joinToString(" | ")
-                .take(500)
         }.orEmpty()
+        // Some HTTP failures return Google's complete HTML error page. Never show markup/CSS
+        // in a chat bubble; reduce it to a readable status/detail while retaining useful codes.
+        val technicalDetail = sanitizeTechnicalDetail(rawTechnicalDetail).take(500)
         val looksLikeAppCheckFailure = technicalDetail.contains("app check", ignoreCase = true) ||
             technicalDetail.contains("403") ||
             technicalDetail.contains("PERMISSION_DENIED", ignoreCase = true) ||
@@ -95,6 +97,20 @@ class GeneralConversationalAiService {
 
         val detailLine = technicalDetail.takeIf { it.isNotBlank() }?.let { "\nجزئیات فنی: $it" }.orEmpty()
         return "ارتباط با Gemini برقرار نشد. اتصال اینترنت، تنظیمات Firebase و مجوز دسترسی سرویس را بررسی کنید و دوباره تلاش کنید.$detailLine"
+    }
+
+    private fun sanitizeTechnicalDetail(raw: String): String {
+        if (raw.isBlank()) return ""
+        return raw
+            .replace(Regex("(?is)<(script|style)[^>]*>.*?</\\1>"), " ")
+            .replace(Regex("(?is)<!DOCTYPE[^>]*>"), " ")
+            .replace(Regex("(?is)<[^>]+>"), " ")
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 
     private suspend fun executeOnlineTurn(
