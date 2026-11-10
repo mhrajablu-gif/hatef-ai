@@ -273,13 +273,14 @@ class AssistantToolRegistry(
         val finalTime = newTimeText ?: PersianDateEngine.formatPersianTime(j.hour, j.minute)
 
         return try {
-            repository.reschedule(id, targetTimestamp, finalDate, finalTime)
             val updated = existing.copy(
                 triggerTimestamp = targetTimestamp,
                 jalaliDateText = finalDate,
                 timeText = finalTime,
-                isCompleted = false
+                isCompleted = false,
+                completedAt = null
             )
+            repository.update(updated)
             // Reschedule alarm
             AlarmScheduler.cancelReminder(context, id)
             val scheduleResult = AlarmScheduler.scheduleReminder(context, updated)
