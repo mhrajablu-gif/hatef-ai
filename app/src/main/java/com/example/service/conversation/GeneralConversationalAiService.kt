@@ -61,14 +61,8 @@ class GeneralConversationalAiService {
             }
         }
 
-        // When network/API is unreachable (e.g. offline mode or test environment), check for domain knowledge fallback
+        // Diagnose security failures before offline fallback: the fallback always returns a string.
         Log.e(TAG, "Online Gemini AI communication failed: ${lastException?.message}", lastException)
-        val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
-        if (offlineFallback != null) {
-            return offlineFallback
-        }
-
-        // Honest error reporting when no response could be generated; never mask as fake Gemini reply
         val technicalDetail = lastException?.let { error ->
             generateSequence(error as Throwable?) { it.cause }
                 .mapNotNull { it.message?.trim()?.takeIf { message -> message.isNotBlank() } }
@@ -90,10 +84,16 @@ class GeneralConversationalAiService {
         } else null
 
         if (looksLikeAppCheckFailure && !debugToken.isNullOrBlank()) {
-            return "درخواست هوش مصنوعی توسط امنیت Firebase (App Check) رد شده است. توکن آزمایشی این نصب را در Firebase Console، بخش App Check و قسمت Manage debug tokens برای همین برنامه ثبت کنید؛ سپس برنامه را دوباره باز کنید.\\n\\nتوکن این نصب:\\n$debugToken\\n\\nجزئیات خطا: $technicalDetail"
+            return "درخواست هوش مصنوعی توسط امنیت Firebase (App Check) رد شده است. توکن آزمایشی این نصب را در Firebase Console، بخش App Check و قسمت Manage debug tokens برای همین برنامه ثبت کنید؛ سپس برنامه را دوباره باز کنید.\n\nتوکن این نصب:\n$debugToken\n\nجزئیات خطا: $technicalDetail"
         }
 
-        val detailLine = technicalDetail.takeIf { it.isNotBlank() }?.let { "\\nجزئیات فنی: $it" }.orEmpty()
+        // If the failure is not an App Check rejection, use a relevant offline answer when available.
+        val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
+        if (offlineFallback != null) {
+            return offlineFallback
+        }
+
+        val detailLine = technicalDetail.takeIf { it.isNotBlank() }?.let { "\nجزئیات فنی: $it" }.orEmpty()
         return "ارتباط با Gemini برقرار نشد. اتصال اینترنت، تنظیمات Firebase و مجوز دسترسی سرویس را بررسی کنید و دوباره تلاش کنید.$detailLine"
     }
 
