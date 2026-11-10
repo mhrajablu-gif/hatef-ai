@@ -1,6 +1,9 @@
 name: Yadet validation (tests + debug APK)
 
 on:
+  push:
+    branches:
+      - integration/yadet-ai-and-reminder-safety
   pull_request:
     branches:
       - main
