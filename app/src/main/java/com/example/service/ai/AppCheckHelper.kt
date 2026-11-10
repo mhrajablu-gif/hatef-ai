@@ -19,17 +19,17 @@ private const val RECAPTCHA_SITE_KEY_RES = "recaptcha_site_key"
 
 fun configureAppCheck(context: Context, intent: Intent?) {
     try {
-        // 1. Ensure FirebaseApp is initialized
-        if (FirebaseApp.getApps(context).isEmpty()) {
-            FirebaseApp.initializeApp(context)
-        }
+        // Initialize the default Firebase app before installing App Check.
+        val firebaseApp = FirebaseApp.getApps(context).firstOrNull()
+            ?: FirebaseApp.initializeApp(context)
+            ?: throw IllegalStateException("Firebase initialization failed: google-services.json is missing or invalid")
 
         if (BuildConfig.DEBUG) {
             // 2. Debug: Read debug token from Intent extra
             val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
 
             if (!debugToken.isNullOrEmpty()) {
-                val persistenceKey = FirebaseApp.getInstance().persistenceKey
+                val persistenceKey = firebaseApp.persistenceKey
                 val prefs = context.getSharedPreferences(
                     "$DEBUG_STORE_PREFIX$persistenceKey",
                     Context.MODE_PRIVATE
@@ -43,10 +43,10 @@ fun configureAppCheck(context: Context, intent: Intent?) {
                 Log.w(TAG, "No debug token found in Intent extra.")
             }
 
-            FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
+            FirebaseAppCheck.getInstance(firebaseApp).installAppCheckProviderFactory(
                 DebugAppCheckProviderFactory.getInstance()
             )
-            Log.d(TAG, "DebugAppCheckProviderFactory installed.")
+            Log.d(TAG, "DebugAppCheckProviderFactory installed. A debug token must be allowlisted in Firebase Console when App Check is enforced.")
         } else {
             // 3. Release: Look up recaptcha_site_key safely without throwing Resources.NotFoundException
             val resId = context.resources.getIdentifier(RECAPTCHA_SITE_KEY_RES, "string", context.packageName)
@@ -66,5 +66,21 @@ fun configureAppCheck(context: Context, intent: Intent?) {
         }
     } catch (e: Exception) {
         Log.e(TAG, "Failed to initialize Firebase App Check", e)
+    }
+}
+
+
+/** Returns the local App Check debug secret for a user-visible troubleshooting message. */
+fun readDebugAppCheckToken(context: Context): String? {
+    return try {
+        val app = FirebaseApp.getInstance()
+        val prefs = context.getSharedPreferences(
+            "$DEBUG_STORE_PREFIX${app.persistenceKey}",
+            Context.MODE_PRIVATE
+        )
+        prefs.getString(DEBUG_SECRET_KEY, null)?.takeIf { it.isNotBlank() }
+    } catch (e: Exception) {
+        Log.w(TAG, "Could not read App Check debug token", e)
+        null
     }
 }
