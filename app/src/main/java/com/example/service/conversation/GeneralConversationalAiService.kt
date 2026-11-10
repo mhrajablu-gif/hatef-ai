@@ -3,6 +3,9 @@ package com.example.service.conversation
 import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
+import com.google.firebase.ai.GenerativeBackend
+import com.google.firebase.FirebaseApp
+import com.example.service.ai.readDebugAppCheckToken
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeout
@@ -17,9 +20,9 @@ class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
     private val model by lazy {
-        Firebase.ai.generativeModel(
-            modelName = "gemini-3.8-flash"
-        )
+        // Select the Gemini Developer API explicitly instead of relying on an implicit backend.
+        Firebase.ai(backend = GenerativeBackend.googleAI())
+            .generativeModel("gemini-3.8-flash")
     }
 
     /**
@@ -66,7 +69,32 @@ class GeneralConversationalAiService {
         }
 
         // Honest error reporting when no response could be generated; never mask as fake Gemini reply
-        return "متأسفانه در حال حاضر امکان برقراری ارتباط با دستیار هوشمند وجود ندارد. لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید."
+        val technicalDetail = lastException?.let { error ->
+            generateSequence(error as Throwable?) { it.cause }
+                .mapNotNull { it.message?.trim()?.takeIf { message -> message.isNotBlank() } }
+                .distinct()
+                .take(3)
+                .joinToString(" | ")
+                .take(500)
+        }.orEmpty()
+        val looksLikeAppCheckFailure = technicalDetail.contains("app check", ignoreCase = true) ||
+            technicalDetail.contains("403") ||
+            technicalDetail.contains("PERMISSION_DENIED", ignoreCase = true) ||
+            technicalDetail.contains("attestation", ignoreCase = true)
+        val debugToken = if (looksLikeAppCheckFailure) {
+            try {
+                readDebugAppCheckToken(FirebaseApp.getInstance().applicationContext)
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+
+        if (looksLikeAppCheckFailure && !debugToken.isNullOrBlank()) {
+            return "درخواست هوش مصنوعی توسط امنیت Firebase (App Check) رد شده است. توکن آزمایشی این نصب را در Firebase Console، بخش App Check و قسمت Manage debug tokens برای همین برنامه ثبت کنید؛ سپس برنامه را دوباره باز کنید.\\n\\nتوکن این نصب:\\n$debugToken\\n\\nجزئیات خطا: $technicalDetail"
+        }
+
+        val detailLine = technicalDetail.takeIf { it.isNotBlank() }?.let { "\\nجزئیات فنی: $it" }.orEmpty()
+        return "ارتباط با Gemini برقرار نشد. اتصال اینترنت، تنظیمات Firebase و مجوز دسترسی سرویس را بررسی کنید و دوباره تلاش کنید.$detailLine"
     }
 
     private suspend fun executeOnlineTurn(
