@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.BuildConfig
+
 import android.app.Activity
 import android.app.AlarmManager
 import android.app.NotificationManager
