@@ -42,11 +42,13 @@ class GeneralConversationalAiService {
         // One bounded online attempt keeps chat responsive; timeout is handled as a
         // recoverable service failure, while real coroutine cancellation still propagates.
         var lastException: Exception? = null
+        var requestTimedOut = false
         try {
             return withTimeout(18_000L) {
                 executeOnlineTurn(trimmed, recentHistory, userContextSummary)
             }
         } catch (e: TimeoutCancellationException) {
+            requestTimedOut = true
             lastException = e
             Log.w(TAG, "Gemini request timed out after 18 seconds", e)
         } catch (e: CancellationException) {
@@ -121,6 +123,9 @@ class GeneralConversationalAiService {
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
         if (offlineFallback != null) {
             return offlineFallback
+        }
+        if (requestTimedOut) {
+            return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد. درخواست متوقف شد تا بیشتر منتظر نمانی؛ لطفاً کمی بعد دوباره تلاش کن."
         }
 
         val detailLine = technicalDetail.takeIf { it.isNotBlank() }?.let { "\nجزئیات فنی: $it" }.orEmpty()
