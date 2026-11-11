@@ -8,6 +8,7 @@ import com.google.firebase.FirebaseApp
 import com.example.service.ai.readDebugAppCheckToken
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -38,27 +39,22 @@ class GeneralConversationalAiService {
         val trimmed = userMessage.trim()
         if (trimmed.isBlank()) return "درود! من یادت هستم؛ چطور می‌توانم کمکتان کنم؟"
 
-        // Online path: at most 2 attempts (1 initial + 1 controlled retry) with cancellation awareness
-        var attempts = 0
-        val maxAttempts = 2
+        // One bounded online attempt keeps chat responsive; timeout is handled as a
+        // recoverable service failure, while real coroutine cancellation still propagates.
         var lastException: Exception? = null
-
-        while (attempts < maxAttempts) {
-            attempts++
-            try {
-                return withTimeout(20_000L) {
-                    executeOnlineTurn(trimmed, recentHistory, userContextSummary)
-                }
-            } catch (e: CancellationException) {
-                // Cooperative coroutine cancellation must NEVER be swallowed
-                throw e
-            } catch (e: Exception) {
-                lastException = e
-                Log.w(TAG, "Gemini turn attempt $attempts failed: ${e.message}")
-                if (attempts < maxAttempts) {
-                    kotlinx.coroutines.delay(1000L)
-                }
+        try {
+            return withTimeout(18_000L) {
+                executeOnlineTurn(trimmed, recentHistory, userContextSummary)
             }
+        } catch (e: TimeoutCancellationException) {
+            lastException = e
+            Log.w(TAG, "Gemini request timed out after 18 seconds", e)
+        } catch (e: CancellationException) {
+            // Preserve cancellation from the caller (for example, leaving the ViewModel).
+            throw e
+        } catch (e: Exception) {
+            lastException = e
+            Log.w(TAG, "Gemini request failed: ${e.message}", e)
         }
 
         // Diagnose security failures before offline fallback: the fallback always returns a string.
