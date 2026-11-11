@@ -243,6 +243,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
             try {
+                // Outer guard covers the complete intent-processing turn, not only the Gemini call.
                 val response = kotlinx.coroutines.withTimeout(22_000L) {
                     conversationalEngine.processTurn(
                         userInput = clean,
