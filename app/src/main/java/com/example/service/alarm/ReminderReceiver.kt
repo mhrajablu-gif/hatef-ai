@@ -24,6 +24,7 @@ class ReminderReceiver : BroadcastReceiver() {
     companion object {
         private const val CHANNEL_PREFIX = "hatef_reminders_"
         const val CHANNEL_NAME = "یادآوری‌های یادت"
+        private const val EXTRA_SNOOZE_MINUTES = "extra_snooze_minutes"
 
         private fun channelIdForSound(soundUri: Uri): String {
             val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -72,7 +73,8 @@ class ReminderReceiver : BroadcastReceiver() {
                         val db = AppDatabase.getDatabase(context)
                         val reminder = db.reminderDao().getReminderById(reminderId)
                         if (reminder != null) {
-                            val newTrigger = System.currentTimeMillis() + 15 * 60 * 1000L
+                            val snoozeMinutes = intent.getIntExtra(EXTRA_SNOOZE_MINUTES, 15).coerceIn(1, 24 * 60)
+                            val newTrigger = System.currentTimeMillis() + snoozeMinutes * 60 * 1000L
                             val jDate = PersianDateEngine.timestampToJalali(newTrigger)
                             val timeStr = PersianDateEngine.formatPersianTime(jDate.hour, jDate.minute)
                             val updated = reminder.copy(
@@ -180,18 +182,24 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Action: Snooze 15m
-        val snoozeIntent = Intent(context, ReminderReceiver::class.java).apply {
-            action = AlarmScheduler.ACTION_SNOOZE_REMINDER
-            putExtra(AlarmScheduler.EXTRA_REMINDER_ID, reminderId)
+        // Quick snooze actions. Android notification layouts support a limited number
+        // of action buttons; the full-screen alarm retains the complete 5/10/15/30/60 chooser.
+        fun createSnoozePendingIntent(minutes: Int): PendingIntent {
+            val snoozeIntent = Intent(context, ReminderReceiver::class.java).apply {
+                action = AlarmScheduler.ACTION_SNOOZE_REMINDER
+                putExtra(AlarmScheduler.EXTRA_REMINDER_ID, reminderId)
+                putExtra(EXTRA_SNOOZE_MINUTES, minutes)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                (reminderId + 300000 + minutes).toInt(),
+                snoozeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
         }
-        val snoozePendingIntent = PendingIntent.getBroadcast(
-            context,
-            (reminderId + 300000).toInt(),
-            snoozeIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
 
+        val snooze5PendingIntent = createSnoozePendingIntent(5)
+        val snooze15PendingIntent = createSnoozePendingIntent(15)
         val fullBody = if (time.isNotBlank()) "⏰ ساعت $time | $description" else description
 
         val builder = NotificationCompat.Builder(context, notificationChannelId)
@@ -208,7 +216,8 @@ class ReminderReceiver : BroadcastReceiver() {
             .setContentIntent(contentPendingIntent)
             .setFullScreenIntent(fullScreenPendingIntent, true)
             .addAction(0, "✅ انجام شد", donePendingIntent)
-            .addAction(0, "⏱ ۱۵ دقیقه بعد", snoozePendingIntent)
+            .addAction(0, "⏱ ۵ دقیقه", snooze5PendingIntent)
+            .addAction(0, "⏱ ۱۵ دقیقه", snooze15PendingIntent)
 
         notificationManager.notify(reminderId.toInt(), builder.build())
     }
