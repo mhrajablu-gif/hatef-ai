@@ -17,6 +17,7 @@ import kotlinx.coroutines.withTimeout
  * Uses Firebase AI Logic (gemini-3.8-flash) when online with a reliable timeout and
  * graceful offline fallback to local knowledge & reasoning rules.
  */
+// CI trigger: chat timeout fix validation
 class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
