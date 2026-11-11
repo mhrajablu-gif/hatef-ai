@@ -243,7 +243,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
             try {
-                val response = kotlinx.coroutines.withTimeout(45_000L) {
+                // Outer guard covers the complete intent-processing turn, not only the Gemini call.
+                val response = kotlinx.coroutines.withTimeout(22_000L) {
                     conversationalEngine.processTurn(
                         userInput = clean,
                         currentState = _conversationState.value,
@@ -266,6 +267,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         infoMessage = response.executedResult.message
                     )
                 }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                android.util.Log.e("MainViewModel", "Chat turn timed out", e)
+                _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = "پاسخ‌گویی در زمان تعیین‌شده انجام نشد. لطفاً دوباره تلاش کنید؛ اگر تکرار شد، اتصال یا سرویس هوش مصنوعی را بررسی می‌کنیم."
+                )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -8,6 +8,7 @@ import com.google.firebase.FirebaseApp
 import com.example.service.ai.readDebugAppCheckToken
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -16,6 +17,7 @@ import kotlinx.coroutines.withTimeout
  * Uses Firebase AI Logic (gemini-3.8-flash) when online with a reliable timeout and
  * graceful offline fallback to local knowledge & reasoning rules.
  */
+// CI trigger: chat timeout fix validation
 class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
@@ -38,27 +40,24 @@ class GeneralConversationalAiService {
         val trimmed = userMessage.trim()
         if (trimmed.isBlank()) return "درود! من یادت هستم؛ چطور می‌توانم کمکتان کنم؟"
 
-        // Online path: at most 2 attempts (1 initial + 1 controlled retry) with cancellation awareness
-        var attempts = 0
-        val maxAttempts = 2
+        // One bounded online attempt keeps chat responsive (18s); the outer chat-turn
+        // deadline is 22s. Timeout is recoverable; caller cancellation still propagates.
         var lastException: Exception? = null
-
-        while (attempts < maxAttempts) {
-            attempts++
-            try {
-                return withTimeout(20_000L) {
-                    executeOnlineTurn(trimmed, recentHistory, userContextSummary)
-                }
-            } catch (e: CancellationException) {
-                // Cooperative coroutine cancellation must NEVER be swallowed
-                throw e
-            } catch (e: Exception) {
-                lastException = e
-                Log.w(TAG, "Gemini turn attempt $attempts failed: ${e.message}")
-                if (attempts < maxAttempts) {
-                    kotlinx.coroutines.delay(1000L)
-                }
+        var requestTimedOut = false
+        try {
+            return withTimeout(18_000L) {
+                executeOnlineTurn(trimmed, recentHistory, userContextSummary)
             }
+        } catch (e: TimeoutCancellationException) {
+            requestTimedOut = true
+            lastException = e
+            Log.w(TAG, "Gemini request timed out after 18 seconds", e)
+        } catch (e: CancellationException) {
+            // Preserve cancellation from the caller (for example, leaving the ViewModel).
+            throw e
+        } catch (e: Exception) {
+            lastException = e
+            Log.w(TAG, "Gemini request failed: ${e.message}", e)
         }
 
         // Diagnose security failures before offline fallback: the fallback always returns a string.
@@ -119,6 +118,11 @@ class GeneralConversationalAiService {
             lowerTechnicalDetail.contains("quota")
         if (isRateLimited) {
             return "درخواست‌های Gemini فعلاً به محدودیت تعداد درخواست یا سهمیه رسیده‌اند. کمی صبر کنید و دوباره امتحان کنید؛ اگر این وضعیت ادامه داشت، باید محدودیت مدل و سهمیهٔ پروژه بررسی شود."
+        }
+
+        // A timeout must be reported clearly; do not mask it with a generic offline answer.
+        if (requestTimedOut) {
+            return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد. درخواست متوقف شد تا بیشتر منتظر نمانی؛ لطفاً کمی بعد دوباره تلاش کن."
         }
 
         // If the failure is not an App Check rejection, use a relevant offline answer when available.
