@@ -3,8 +3,12 @@ package com.example.service.conversation
 import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.FirebaseApp
+import com.example.service.ai.readDebugAppCheckToken
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -13,13 +17,14 @@ import kotlinx.coroutines.withTimeout
  * Uses Firebase AI Logic (gemini-3.8-flash) when online with a reliable timeout and
  * graceful offline fallback to local knowledge & reasoning rules.
  */
+// CI trigger: chat timeout fix validation
 class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
     private val model by lazy {
-        Firebase.ai.generativeModel(
-            modelName = "gemini-3.8-flash"
-        )
+        // Select the Gemini Developer API explicitly instead of relying on an implicit backend.
+        Firebase.ai(backend = GenerativeBackend.googleAI())
+            .generativeModel("gemini-3.8-flash")
     }
 
     /**
@@ -35,38 +40,127 @@ class GeneralConversationalAiService {
         val trimmed = userMessage.trim()
         if (trimmed.isBlank()) return "درود! من یادت هستم؛ چطور می‌توانم کمکتان کنم؟"
 
-        // Online path: at most 2 attempts (1 initial + 1 controlled retry) with cancellation awareness
-        var attempts = 0
-        val maxAttempts = 2
+        // One bounded online attempt keeps chat responsive (18s); the outer chat-turn
+        // deadline is 22s. Timeout is recoverable; caller cancellation still propagates.
         var lastException: Exception? = null
-
-        while (attempts < maxAttempts) {
-            attempts++
-            try {
-                return withTimeout(20_000L) {
-                    executeOnlineTurn(trimmed, recentHistory, userContextSummary)
-                }
-            } catch (e: CancellationException) {
-                // Cooperative coroutine cancellation must NEVER be swallowed
-                throw e
-            } catch (e: Exception) {
-                lastException = e
-                Log.w(TAG, "Gemini turn attempt $attempts failed: ${e.message}")
-                if (attempts < maxAttempts) {
-                    kotlinx.coroutines.delay(1000L)
-                }
+        var requestTimedOut = false
+        try {
+            return withTimeout(18_000L) {
+                executeOnlineTurn(trimmed, recentHistory, userContextSummary)
             }
+        } catch (e: TimeoutCancellationException) {
+            requestTimedOut = true
+            lastException = e
+            Log.w(TAG, "Gemini request timed out after 18 seconds", e)
+        } catch (e: CancellationException) {
+            // Preserve cancellation from the caller (for example, leaving the ViewModel).
+            throw e
+        } catch (e: Exception) {
+            lastException = e
+            Log.w(TAG, "Gemini request failed: ${e.message}", e)
         }
 
-        // When network/API is unreachable (e.g. offline mode or test environment), check for domain knowledge fallback
+        // Diagnose security failures before offline fallback: the fallback always returns a string.
         Log.e(TAG, "Online Gemini AI communication failed: ${lastException?.message}", lastException)
+        val rawTechnicalDetail = lastException?.let { error ->
+            generateSequence(error as Throwable?) { it.cause }
+                .mapNotNull { it.message?.trim()?.takeIf { message -> message.isNotBlank() } }
+                .distinct()
+                .take(3)
+                .joinToString(" | ")
+        }.orEmpty()
+        // Some HTTP failures return Google's complete HTML error page. Never show markup/CSS
+        // in a chat bubble; reduce it to a readable status/detail while retaining useful codes.
+        val technicalDetail = sanitizeTechnicalDetail(rawTechnicalDetail).take(500)
+        // A generic HTTP 403 is NOT proof of an App Check failure. Firebase AI Logic
+        // can return 403 when the Firebase API key belongs to another project, the
+        // Firebase AI Logic API is disabled, or the key's API allowlist blocks it.
+        // Only classify explicit App Check / attestation messages as App Check failures.
+        val looksLikeAppCheckFailure =
+            technicalDetail.contains("app check", ignoreCase = true) ||
+            technicalDetail.contains("appcheck", ignoreCase = true) ||
+            technicalDetail.contains("attestation", ignoreCase = true) ||
+            technicalDetail.contains("debug token", ignoreCase = true)
+
+        val isForbiddenAccessFailure =
+            technicalDetail.contains("403") ||
+            technicalDetail.contains("forbidden", ignoreCase = true) ||
+            technicalDetail.contains("PERMISSION_DENIED", ignoreCase = true) ||
+            technicalDetail.contains("does not have permission", ignoreCase = true) ||
+            technicalDetail.contains("requests to this api", ignoreCase = true)
+        val debugToken = if (looksLikeAppCheckFailure) {
+            try {
+                readDebugAppCheckToken(FirebaseApp.getInstance().applicationContext)
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+
+        if (looksLikeAppCheckFailure && !debugToken.isNullOrBlank()) {
+            return "درخواست هوش مصنوعی توسط امنیت Firebase (App Check) رد شده است. توکن آزمایشی این نصب را در Firebase Console، بخش App Check و قسمت Manage debug tokens برای همین برنامه ثبت کنید؛ سپس برنامه را دوباره باز کنید.\n\nتوکن این نصب:\n$debugToken\n\nجزئیات خطا: $technicalDetail"
+        }
+
+        if (isForbiddenAccessFailure) {
+            return "دسترسی Firebase AI Logic به Gemini با خطای 403 رد شده است؛ این پیام به‌تنهایی به معنی مشکل App Check نیست. باید مطمئن شویم فایل google-services.json متعلق به همان پروژه Firebase با شناسه yadet-ai است، APIهای Firebase AI Logic (firebasevertexai.googleapis.com) و Gemini Developer API (generativelanguage.googleapis.com) فعال‌اند و API key برنامه اجازه فراخوانی Firebase AI Logic API را دارد. پس از اصلاح تنظیمات پروژه، نیازی به پاک‌کردن اطلاعات یا یادآورها نیست؛ برنامه را دوباره اجرا کنید."
+        }
+
+        // Report transient Gemini capacity/rate-limit failures accurately instead of blaming Firebase.
+        val lowerTechnicalDetail = technicalDetail.lowercase()
+        val isHighDemand = lowerTechnicalDetail.contains("high demand") ||
+            lowerTechnicalDetail.contains("overloaded") ||
+            lowerTechnicalDetail.contains("503") ||
+            lowerTechnicalDetail.contains("service unavailable")
+        if (isHighDemand) {
+            return "سرویس Gemini در حال حاضر به‌دلیل حجم زیاد درخواست‌ها موقتاً پاسخ‌گو نیست. این خطا از شلوغی موقت سرویس است، نه لزوماً از اینترنت یا تنظیمات Firebase. لطفاً کمی بعد دوباره تلاش کنید."
+        }
+        val isRateLimited = lowerTechnicalDetail.contains("429") ||
+            lowerTechnicalDetail.contains("resource_exhausted") ||
+            lowerTechnicalDetail.contains("quota")
+        if (isRateLimited) {
+            return "درخواست‌های Gemini فعلاً به محدودیت تعداد درخواست یا سهمیه رسیده‌اند. کمی صبر کنید و دوباره امتحان کنید؛ اگر این وضعیت ادامه داشت، باید محدودیت مدل و سهمیهٔ پروژه بررسی شود."
+        }
+
+        // A timeout must be reported clearly; do not mask it with a generic offline answer.
+        if (requestTimedOut) {
+            // In debug builds the App Check debug provider persists its generated secret locally.
+            // Surface it only after a timeout so a non-technical tester can register it if needed.
+            // Never log, upload, or commit this secret.
+            val debugToken = try {
+                readDebugAppCheckToken(FirebaseApp.getInstance().applicationContext)
+            } catch (_: Exception) {
+                null
+            }
+            if (!debugToken.isNullOrBlank()) {
+                return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد. یکی از علت‌های احتمالی، ثبت‌نشدن کد امنیتی آزمایشی Firebase است؛ هنوز قطعی نیست.\n\n" +
+                    "اگر این کد را قبلاً در Firebase ثبت نکرده‌ای، آن را در Firebase Console در بخش App Check، مقابل برنامه یادت و قسمت Manage debug tokens ثبت کن. سپس برنامه را کامل ببند و دوباره باز کن.\n\n" +
+                    "کد آزمایشی این نصب (محرمانه؛ آن را در گروه‌ها یا مخزن GitHub منتشر نکن):\n$debugToken\n\n" +
+                    "اگر کد قبلاً ثبت شده باشد، باید علت دیگری مثل تنظیمات API یا سرویس بررسی شود."
+            }
+            return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد و کد آزمایشی App Check هم هنوز در حافظه برنامه پیدا نشد. این موضوع به‌تنهایی علت را مشخص نمی‌کند؛ باید گزارش دقیق خطای Firebase بررسی شود. لطفاً کمی بعد دوباره تلاش کن."
+        }
+
+        // If the failure is not an App Check rejection, use a relevant offline answer when available.
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
         if (offlineFallback != null) {
             return offlineFallback
         }
 
-        // Honest error reporting when no response could be generated; never mask as fake Gemini reply
-        return "متأسفانه در حال حاضر امکان برقراری ارتباط با دستیار هوشمند وجود ندارد. لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید."
+        val detailLine = technicalDetail.takeIf { it.isNotBlank() }?.let { "\nجزئیات فنی: $it" }.orEmpty()
+        return "ارتباط با Gemini برقرار نشد. اتصال اینترنت، تنظیمات Firebase و مجوز دسترسی سرویس را بررسی کنید و دوباره تلاش کنید.$detailLine"
+    }
+
+    private fun sanitizeTechnicalDetail(raw: String): String {
+        if (raw.isBlank()) return ""
+        return raw
+            .replace(Regex("(?is)<(script|style)[^>]*>.*?</\\1>"), " ")
+            .replace(Regex("(?is)<!DOCTYPE[^>]*>"), " ")
+            .replace(Regex("(?is)<[^>]+>"), " ")
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace(Regex("\\s+"), " ")
+            .trim()
     }
 
     private suspend fun executeOnlineTurn(
@@ -92,7 +186,7 @@ class GeneralConversationalAiService {
         historyContentList.add(content("model") { text("متوجه شدم. من «یادت»، دستیار هوشمند، دانا و همراه شما به زبان فارسی هستم.") })
 
         // Extract clean alternating turns from prior history (up to last 8 messages)
-        val cleanPrior = priorHistory.takeLast(8)
+        val cleanPrior = priorHistory.takeLast(20)
         var expectedSender = MessageSender.USER
         for (msg in cleanPrior) {
             if (msg.sender == expectedSender && msg.text.isNotBlank()) {
@@ -168,7 +262,7 @@ class GeneralConversationalAiService {
      * Local offline Persian conversational and knowledge fallback covering
      * technology, science, productivity, health, psychology, and general reasoning.
      */
-    fun getOfflineKnowledgeReply(input: String): String {
+    fun getOfflineKnowledgeReply(input: String): String? {
         val direct = checkDirectAdvisoryOrRoutine(input)
         if (direct != null) return direct
 
@@ -230,11 +324,10 @@ class GeneralConversationalAiService {
             lower.contains("حالت چطوره") || lower.contains("چطوری") || lower.contains("خوبی") ->
                 "ممنونم، حالم عالی است و با اشتیاق آماده همراهی شما هستم! شما در چه حالید و روی چه برنامه‌ای کار می‌کنید؟"
 
-            lower.contains("کی هستی") || lower.contains("چه کارهایی بلدی") || lower.contains("راهنما") ->
+            lower.contains("کی هستی") || lower.contains("چه کارهایی بلدی") || lower == "راهنما" || lower.contains("راهنمای برنامه") || lower.contains("راهنمای استفاده") ->
                 "من «یادت» هستم؛ دستیار هوشمند شما با قابلیت‌های جامع:\n۱. پاسخ به پرسش‌های عمومی، علمی، فناوری، برنامه‌ریزی و ایده‌پردازی به زبان فارسی.\n۲. مدیریت هوشمند تمام قرارها و یادآورها: ثبت، حذف تک‌تک یا همگی («همه رو حذف کن»)، جابجایی («ساعت رو بکن ۱۰»)، و جلو/عقب انداختن.\n۳. تغییر تنظیمات برنامه با فرمان صوتی یا متنی («تم رو تاریک کن»، «پیش‌اعلان رو بکن ۳۰ دقیقه»).\n۴. حافظه بلندمدت برای به خاطر سپردن عادات و ساعات خواب و بیداری شما."
 
-            else ->
-                "من سوال یا دیدگاه شما را بررسی کردم. در تمام زمینه‌های برنامه‌ریزی، مدیریت یادآورها، دانش عمومی، علوم و فناوری در خدمت شما هستم. اگر مایلید جزئیات بیشتری درباره موضوع بفرمایید، با کمال میل با شما گفتگو و راهنمایی خواهم کرد."
+            else -> null
         }
     }
 }

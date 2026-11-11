@@ -81,7 +81,7 @@ class AssistantToolRegistry(
         return try {
             val id = repository.insert(entity)
             val savedEntity = entity.copy(id = id)
-            AlarmScheduler.scheduleReminder(context, savedEntity)
+            val scheduleResult = AlarmScheduler.scheduleReminder(context, savedEntity)
 
             // Check for close time conflicts
             val conflict = repository.findConflictingReminder(task.triggerTimestamp, excludeId = id)
@@ -89,9 +89,17 @@ class AssistantToolRegistry(
                 " (توجه: با «${conflict.title}» در ساعت ${conflict.timeText} هم‌پوشانی دارد)"
             } else ""
 
+            val scheduleMessage = when (scheduleResult) {
+                com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> "و آلارم آن نیز زمان‌بندی شد"
+                com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED -> "اما فقط بخشی از هشدارهای آن زمان‌بندی شد"
+                com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE -> "اما زمان آن گذشته یا یادآور تکمیل‌شده است و آلارم فعالی ندارد"
+                com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED -> "اما مجوز هشدار دقیق فعال نیست و آلارم زمان‌بندی نشد"
+                com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+                com.example.service.alarm.AlarmScheduleResult.FAILED -> "اما زمان‌بندی آلارم ناموفق بود"
+            }
             ToolResult(
                 success = true,
-                message = "یادآور «${savedEntity.title}» برای $finalDateText ساعت $finalTimeText با موفقیت ثبت شد$conflictNote.",
+                message = "یادآور «${savedEntity.title}» برای $finalDateText ساعت $finalTimeText ثبت شد؛ $scheduleMessage$conflictNote.",
                 data = savedEntity
             )
         } catch (e: Exception) {
@@ -265,16 +273,17 @@ class AssistantToolRegistry(
         val finalTime = newTimeText ?: PersianDateEngine.formatPersianTime(j.hour, j.minute)
 
         return try {
-            repository.reschedule(id, targetTimestamp, finalDate, finalTime)
             val updated = existing.copy(
                 triggerTimestamp = targetTimestamp,
                 jalaliDateText = finalDate,
                 timeText = finalTime,
-                isCompleted = false
+                isCompleted = false,
+                completedAt = null
             )
+            repository.update(updated)
             // Reschedule alarm
             AlarmScheduler.cancelReminder(context, id)
-            AlarmScheduler.scheduleReminder(context, updated)
+            val scheduleResult = AlarmScheduler.scheduleReminder(context, updated)
 
             val desc = if (offsetMinutes != null) {
                 if (offsetMinutes > 0) "$offsetMinutes دقیقه به تعویق افتاد" else "${-offsetMinutes} دقیقه جلو کشیده شد"
@@ -282,9 +291,17 @@ class AssistantToolRegistry(
                 "به تاریخ $finalDate ساعت $finalTime منتقل شد"
             }
 
+            val scheduleMessage = when (scheduleResult) {
+                com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> "و آلارم آن نیز تنظیم شد"
+                com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED -> "اما فقط بخشی از هشدارهای آن تنظیم شد"
+                com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE -> "اما زمان آن گذشته یا یادآور تکمیل‌شده است و آلارم فعالی ندارد"
+                com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED -> "اما مجوز هشدار دقیق فعال نیست و آلارم تنظیم نشد"
+                com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+                com.example.service.alarm.AlarmScheduleResult.FAILED -> "اما تنظیم آلارم ناموفق بود"
+            }
             ToolResult(
                 success = true,
-                message = "یادآور «${existing.title}» $desc و آلارم آن مجدداً تنظیم گردید.",
+                message = "یادآور «${existing.title}» $desc $scheduleMessage.",
                 data = updated
             )
         } catch (e: Exception) {
@@ -355,13 +372,18 @@ class AssistantToolRegistry(
         return try {
             repository.update(updated)
             AlarmScheduler.cancelReminder(context, id)
-            if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
+            val scheduleResult = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
                 AlarmScheduler.scheduleReminder(context, updated)
-            }
-            val alertDesc = if (advanceAlertMinutes > 0) {
-                "پیش‌اعلان $advanceAlertMinutes دقیقه قبل برای «${updated.title}» فعال شد."
             } else {
-                "پیش‌اعلان یادآور «${updated.title}» غیرفعال شد."
+                com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE
+            }
+            val alertDesc = when (scheduleResult) {
+                com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> if (advanceAlertMinutes > 0) "پیش‌اعلان $advanceAlertMinutes دقیقه قبل برای «${updated.title}» فعال و آلارم زمان‌بندی شد." else "پیش‌اعلان یادآور «${updated.title}» غیرفعال و آلارم اصلی زمان‌بندی شد."
+                com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED -> "تنظیمات پیش‌اعلان ذخیره شد، اما فقط بخشی از آلارم‌های «${updated.title}» زمان‌بندی شد."
+                com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED -> "تنظیمات ذخیره شد، اما مجوز هشدار دقیق فعال نیست و آلارم «${updated.title}» تنظیم نشد."
+                com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE -> "تنظیمات ذخیره شد؛ این یادآور تکمیل‌شده یا موعدگذشته است و آلارم فعالی ندارد."
+                com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+                com.example.service.alarm.AlarmScheduleResult.FAILED -> "تنظیمات ذخیره شد، اما زمان‌بندی آلارم «${updated.title}» ناموفق بود."
             }
             ToolResult(
                 success = true,
@@ -424,12 +446,16 @@ class AssistantToolRegistry(
             )
         }
 
-        val isScheduled = !rem.isCompleted && rem.triggerTimestamp > System.currentTimeMillis()
-        val alarmStatus = if (isScheduled) "آلارم فعال و زمان‌بندی شده است" else "آلارم غیرفعال یا گذشته است"
+        val hasFuturePendingRecord = !rem.isCompleted && rem.triggerTimestamp > System.currentTimeMillis()
+        val recordStatus = if (hasFuturePendingRecord) {
+            "رکورد یادآور فعال و دارای موعد آینده است"
+        } else {
+            "یادآور تکمیل‌شده یا موعدگذشته است"
+        }
 
         return ToolResult(
             success = true,
-            message = "رکورد «${rem.title}» در پایگاه داده موجود است. وضعیت: $alarmStatus (تاریخ: ${rem.jalaliDateText} ساعت ${rem.timeText}).",
+            message = "رکورد «${rem.title}» در پایگاه داده موجود است. $recordStatus (تاریخ: ${rem.jalaliDateText} ساعت ${rem.timeText}). توجه: از این مسیر نمی‌توان ثبت واقعی PendingIntent در سرویس آلارم اندروید را مستقیماً تأیید کرد؛ وضعیت بالا فقط از روی اطلاعات ذخیره‌شده بررسی شده است.",
             data = rem
         )
     }

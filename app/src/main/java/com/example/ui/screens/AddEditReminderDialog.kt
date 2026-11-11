@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -167,11 +170,12 @@ fun AddEditReminderDialog(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     // Hour Wheel (0..23)
                     com.example.ui.components.WheelDrawerPicker(
                         value = selectedHour,
@@ -195,6 +199,7 @@ fun AddEditReminderDialog(
                         onValueChange = { selectedMinute = it },
                         label = "دقیقه"
                     )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))

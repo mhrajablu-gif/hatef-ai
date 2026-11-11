@@ -22,8 +22,14 @@ import kotlinx.coroutines.launch
 class ReminderReceiver : BroadcastReceiver() {
 
     companion object {
-        const val CHANNEL_ID = "hatef_reminders_channel"
+        private const val CHANNEL_PREFIX = "hatef_reminders_"
         const val CHANNEL_NAME = "یادآوری‌های یادت"
+
+        private fun channelIdForSound(soundUri: Uri): String {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(soundUri.toString().toByteArray(Charsets.UTF_8))
+            return CHANNEL_PREFIX + digest.take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -42,6 +48,8 @@ class ReminderReceiver : BroadcastReceiver() {
             AlarmScheduler.ACTION_COMPLETE_REMINDER -> {
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.cancel(reminderId.toInt())
+                // Completing from an advance-alert notification must also cancel the main alarm.
+                AlarmScheduler.cancelReminder(context, reminderId)
 
                 val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
@@ -69,8 +77,10 @@ class ReminderReceiver : BroadcastReceiver() {
                             val timeStr = PersianDateEngine.formatPersianTime(jDate.hour, jDate.minute)
                             val updated = reminder.copy(
                                 triggerTimestamp = newTrigger,
+                                jalaliDateText = jDate.formatPersianNumeric(),
                                 timeText = timeStr,
-                                isCompleted = false
+                                isCompleted = false,
+                                completedAt = null
                             )
                             db.reminderDao().update(updated)
                             AlarmScheduler.scheduleReminder(context, updated)
@@ -105,6 +115,8 @@ class ReminderReceiver : BroadcastReceiver() {
             AlarmSoundPreferences.getResolvedSoundUri(context)
         }
 
+        val notificationChannelId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) channelIdForSound(soundUri) else CHANNEL_PREFIX + "legacy"
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val audioAttributes = AudioAttributes.Builder()
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -112,7 +124,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 .build()
 
             val channel = NotificationChannel(
-                CHANNEL_ID,
+                notificationChannelId,
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
@@ -141,10 +153,8 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Try direct launch for instant full-screen wake-up
-        try {
-            context.startActivity(fullScreenIntent)
-        } catch (_: Exception) {}
+        // Android restricts background activity launches. Use the supported full-screen
+        // notification intent; the system decides whether to launch it or show a heads-up alert.
 
         // Tap to open app
         val contentIntent = Intent(context, MainActivity::class.java).apply {
@@ -184,7 +194,7 @@ class ReminderReceiver : BroadcastReceiver() {
 
         val fullBody = if (time.isNotBlank()) "⏰ ساعت $time | $description" else description
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, notificationChannelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(fullBody)

@@ -8,6 +8,8 @@ import android.os.Build
 import android.util.Log
 import com.example.data.model.ReminderEntity
 
+enum class AlarmScheduleResult { SCHEDULED, PARTIALLY_SCHEDULED, ALREADY_DUE, EXACT_ALARM_PERMISSION_REQUIRED, ALARM_SERVICE_UNAVAILABLE, FAILED }
+
 object AlarmScheduler {
     private const val TAG = "AlarmScheduler"
 
@@ -22,9 +24,14 @@ object AlarmScheduler {
     const val EXTRA_REMINDER_SOUND_URI = "extra_reminder_sound_uri"
     const val EXTRA_IS_ADVANCE = "extra_is_advance"
 
-    fun scheduleReminder(context: Context, reminder: ReminderEntity) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    fun scheduleReminder(context: Context, reminder: ReminderEntity): AlarmScheduleResult {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE
         val now = System.currentTimeMillis()
+        if (reminder.isCompleted || reminder.triggerTimestamp <= now) {
+            cancelReminder(context, reminder.id)
+            return AlarmScheduleResult.ALREADY_DUE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) return AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED
 
         // Schedule primary alarm
         if (reminder.triggerTimestamp > now) {
@@ -45,10 +52,11 @@ object AlarmScheduler {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            setExactAlarm(alarmManager, reminder.triggerTimestamp, pendingIntent)
+            if (!setExactAlarm(alarmManager, reminder.triggerTimestamp, pendingIntent)) return AlarmScheduleResult.FAILED
             Log.d(TAG, "Scheduled reminder ${reminder.id} at ${reminder.triggerTimestamp}")
         }
 
+        var advanceScheduled = true
         // Schedule advance warning alert if configured
         if (reminder.advanceAlertMinutes > 0) {
             val advanceMillis = reminder.triggerTimestamp - (reminder.advanceAlertMinutes * 60 * 1000L)
@@ -70,9 +78,10 @@ object AlarmScheduler {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
 
-                setExactAlarm(alarmManager, advanceMillis, advancePendingIntent)
+                advanceScheduled = setExactAlarm(alarmManager, advanceMillis, advancePendingIntent)
             }
         }
+        return if (advanceScheduled) AlarmScheduleResult.SCHEDULED else AlarmScheduleResult.PARTIALLY_SCHEDULED
     }
 
     fun cancelReminder(context: Context, reminderId: Long) {
@@ -106,20 +115,28 @@ object AlarmScheduler {
         }
     }
 
-    private fun setExactAlarm(alarmManager: AlarmManager, triggerAtMillis: Long, pendingIntent: PendingIntent) {
+    private fun setExactAlarm(alarmManager: AlarmManager, triggerAtMillis: Long, pendingIntent: PendingIntent): Boolean {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-                } else {
-                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
-                }
-            } else {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                !alarmManager.canScheduleExactAlarms()
+            ) {
+                // Do not silently downgrade a user-requested reminder to an inexact alarm.
+                // Settings explains how to grant the required Alarms & reminders access.
+                Log.w(TAG, "Exact alarm access is not granted; reminder was not scheduled.")
+                return false
             }
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerAtMillis,
+                pendingIntent
+            )
+            return true
         } catch (e: SecurityException) {
             Log.e(TAG, "Cannot schedule exact alarm without permission", e)
-            alarmManager.set(AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent)
+            return false
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "Failed to schedule exact alarm", e)
+            return false
         }
     }
 }
