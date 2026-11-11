@@ -47,6 +47,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Snooze
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -294,6 +296,7 @@ fun FullScreenAlarmScreen(
     onDismiss: () -> Unit
 ) {
     var currentTimeString by remember { mutableStateOf("") }
+    var showSnoozeOptions by remember { mutableStateOf(false) }
     val currentJalali = PersianDateEngine.timestampToJalali(System.currentTimeMillis())
     val weekday = PersianDateEngine.getPersianWeekdayName(System.currentTimeMillis())
 
@@ -306,6 +309,33 @@ fun FullScreenAlarmScreen(
             )
             delay(1000L)
         }
+    }
+
+    if (showSnoozeOptions) {
+        AlertDialog(
+            onDismissRequest = { showSnoozeOptions = false },
+            title = { Text("مدت زمان تعویق") },
+            text = { Text("یادآوری را چه مدت به تعویق بیندازم؟") },
+            confirmButton = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(5, 10, 15).forEach { minutes ->
+                            TextButton(onClick = { showSnoozeOptions = false; onSnooze(minutes) }) {
+                                Text(PersianDateEngine.toPersianDigits(minutes) + " دقیقه")
+                            }
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(30, 60).forEach { minutes ->
+                            TextButton(onClick = { showSnoozeOptions = false; onSnooze(minutes) }) {
+                                Text(if (minutes == 60) "۱ ساعت" else "۳۰ دقیقه")
+                            }
+                        }
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { showSnoozeOptions = false }) { Text("انصراف") } }
+        )
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "alarm_pulse")
@@ -481,7 +511,7 @@ fun FullScreenAlarmScreen(
                 ) {
                     // Snooze 10 minutes button
                     Button(
-                        onClick = { onSnooze(10) },
+                        onClick = { showSnoozeOptions = true },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2C3E50)),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
@@ -492,7 +522,7 @@ fun FullScreenAlarmScreen(
                         Icon(Icons.Filled.Snooze, contentDescription = null, tint = AmberWarning, modifier = Modifier.size(20.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "۱۰ دقیقه بعد",
+                            text = "تعویق",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
