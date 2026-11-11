@@ -119,13 +119,15 @@ class GeneralConversationalAiService {
             return "درخواست‌های Gemini فعلاً به محدودیت تعداد درخواست یا سهمیه رسیده‌اند. کمی صبر کنید و دوباره امتحان کنید؛ اگر این وضعیت ادامه داشت، باید محدودیت مدل و سهمیهٔ پروژه بررسی شود."
         }
 
+        // A timeout must be reported clearly; do not mask it with a generic offline answer.
+        if (requestTimedOut) {
+            return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد. درخواست متوقف شد تا بیشتر منتظر نمانی؛ لطفاً کمی بعد دوباره تلاش کن."
+        }
+
         // If the failure is not an App Check rejection, use a relevant offline answer when available.
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
         if (offlineFallback != null) {
             return offlineFallback
-        }
-        if (requestTimedOut) {
-            return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد. درخواست متوقف شد تا بیشتر منتظر نمانی؛ لطفاً کمی بعد دوباره تلاش کن."
         }
 
         val detailLine = technicalDetail.takeIf { it.isNotBlank() }?.let { "\nجزئیات فنی: $it" }.orEmpty()
