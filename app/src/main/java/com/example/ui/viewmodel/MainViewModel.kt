@@ -243,7 +243,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
             try {
-                val response = kotlinx.coroutines.withTimeout(45_000L) {
+                val response = kotlinx.coroutines.withTimeout(22_000L) {
                     conversationalEngine.processTurn(
                         userInput = clean,
                         currentState = _conversationState.value,
