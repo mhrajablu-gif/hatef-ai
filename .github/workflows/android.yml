@@ -8,6 +8,7 @@ on:
   pull_request:
     branches:
       - main
+      - integration/yadet-ai-and-reminder-safety
 
 jobs:
   build:
