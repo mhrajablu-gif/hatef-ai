@@ -122,7 +122,21 @@ class GeneralConversationalAiService {
 
         // A timeout must be reported clearly; do not mask it with a generic offline answer.
         if (requestTimedOut) {
-            return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد. درخواست متوقف شد تا بیشتر منتظر نمانی؛ لطفاً کمی بعد دوباره تلاش کن."
+            // In debug builds the App Check debug provider persists its generated secret locally.
+            // Surface it only after a timeout so a non-technical tester can register it if needed.
+            // Never log, upload, or commit this secret.
+            val debugToken = try {
+                readDebugAppCheckToken(FirebaseApp.getInstance().applicationContext)
+            } catch (_: Exception) {
+                null
+            }
+            if (!debugToken.isNullOrBlank()) {
+                return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد. یکی از علت‌های احتمالی، ثبت‌نشدن کد امنیتی آزمایشی Firebase است؛ هنوز قطعی نیست.\n\n" +
+                    "اگر این کد را قبلاً در Firebase ثبت نکرده‌ای، آن را در Firebase Console در بخش App Check، مقابل برنامه یادت و قسمت Manage debug tokens ثبت کن. سپس برنامه را کامل ببند و دوباره باز کن.\n\n" +
+                    "کد آزمایشی این نصب (محرمانه؛ آن را در گروه‌ها یا مخزن GitHub منتشر نکن):\n$debugToken\n\n" +
+                    "اگر کد قبلاً ثبت شده باشد، باید علت دیگری مثل تنظیمات API یا سرویس بررسی شود."
+            }
+            return "Gemini در مهلت ۱۸ ثانیه‌ای پاسخ نداد و کد آزمایشی App Check هم هنوز در حافظه برنامه پیدا نشد. این موضوع به‌تنهایی علت را مشخص نمی‌کند؛ باید گزارش دقیق خطای Firebase بررسی شود. لطفاً کمی بعد دوباره تلاش کن."
         }
 
         // If the failure is not an App Check rejection, use a relevant offline answer when available.
