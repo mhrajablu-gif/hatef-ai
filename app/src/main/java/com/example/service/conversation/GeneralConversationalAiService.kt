@@ -39,8 +39,8 @@ class GeneralConversationalAiService {
         val trimmed = userMessage.trim()
         if (trimmed.isBlank()) return "درود! من یادت هستم؛ چطور می‌توانم کمکتان کنم؟"
 
-        // One bounded online attempt keeps chat responsive; timeout is handled as a
-        // recoverable service failure, while real coroutine cancellation still propagates.
+        // One bounded online attempt keeps chat responsive (18s); the outer chat-turn
+        // deadline is 22s. Timeout is recoverable; caller cancellation still propagates.
         var lastException: Exception? = null
         var requestTimedOut = false
         try {
