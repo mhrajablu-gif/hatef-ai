@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - integration/yadet-ai-and-reminder-safety
   pull_request:
     branches:
       - main
