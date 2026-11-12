@@ -77,3 +77,5 @@ jobs:
           name: Yadet-APK
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+# Rebuild after stable signing-key restoration and Android version bump.
