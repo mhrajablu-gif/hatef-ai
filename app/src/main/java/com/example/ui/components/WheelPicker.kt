@@ -104,7 +104,7 @@ fun WheelDrawerPicker(
                 // Arrow / Item Above
                 val prevVal = range[(currentIndex - 1).mod(range.size)]
                 IconButton(
-                    onClick = { step(-1) },
+                    onClick = { step(1) },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
@@ -142,7 +142,7 @@ fun WheelDrawerPicker(
 
                 // Arrow / Item Below
                 IconButton(
-                    onClick = { step(1) },
+                    onClick = { step(-1) },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
@@ -216,7 +216,7 @@ fun MonthWheelDrawerPicker(
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
                 IconButton(
-                    onClick = { step(-1) },
+                    onClick = { step(1) },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
@@ -252,7 +252,7 @@ fun MonthWheelDrawerPicker(
                 }
 
                 IconButton(
-                    onClick = { step(1) },
+                    onClick = { step(-1) },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
