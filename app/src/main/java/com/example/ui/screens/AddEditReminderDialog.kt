@@ -172,12 +172,12 @@ fun AddEditReminderDialog(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Hour Wheel (0..23)
+                    // Minute Wheel (0..59) — placed first so it appears on the right in RTL.
                     com.example.ui.components.WheelDrawerPicker(
-                        value = selectedHour,
-                        range = (0..23).toList(),
-                        onValueChange = { selectedHour = it },
-                        label = "ساعت"
+                        value = selectedMinute,
+                        range = (0..59).toList(),
+                        onValueChange = { selectedMinute = it },
+                        label = "دقیقه"
                     )
 
                     Text(
@@ -188,12 +188,12 @@ fun AddEditReminderDialog(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 20.dp)
                     )
 
-                    // Minute Wheel (0..59)
+                    // Hour Wheel (0..23) — appears on the left in RTL.
                     com.example.ui.components.WheelDrawerPicker(
-                        value = selectedMinute,
-                        range = (0..59).toList(),
-                        onValueChange = { selectedMinute = it },
-                        label = "دقیقه"
+                        value = selectedHour,
+                        range = (0..23).toList(),
+                        onValueChange = { selectedHour = it },
+                        label = "ساعت"
                     )
                 }
 

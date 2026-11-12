@@ -242,31 +242,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
-            val response = conversationalEngine.processTurn(
-                userInput = clean,
-                currentState = _conversationState.value,
-                recentHistory = updatedHistory
-            )
-
-            _conversationState.value = response.newState
-
-            val assistantMsg = com.example.service.conversation.ChatMessage(
-                sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                text = response.replyText,
-                actionCard = response.actionCard,
-                suggestedReplies = response.suggestedReplies
-            )
-
-            _chatMessages.value = _chatMessages.value + assistantMsg
-            _uiState.value = _uiState.value.copy(isAiParsing = false)
-
-            // Speak response via TTS
-            ttsSpeaker.speak(response.replyText)
-
-            if (response.executedResult != null && response.executedResult.success) {
-                _uiState.value = _uiState.value.copy(
-                    infoMessage = response.executedResult.message
+            try {
+                val response = conversationalEngine.processTurn(
+                    userInput = clean,
+                    currentState = _conversationState.value,
+                    recentHistory = updatedHistory
                 )
+
+                _conversationState.value = response.newState
+
+                val assistantMsg = com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = response.replyText,
+                    actionCard = response.actionCard,
+                    suggestedReplies = response.suggestedReplies
+                )
+
+                _chatMessages.value = _chatMessages.value + assistantMsg
+
+                // Speak response via TTS
+                ttsSpeaker.speak(response.replyText)
+
+                if (response.executedResult != null && response.executedResult.success) {
+                    _uiState.value = _uiState.value.copy(
+                        infoMessage = response.executedResult.message
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Chat turn failed", e)
+                _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = "متأسفانه پاسخ این پیام دریافت نشد. اتصال اینترنت و وضعیت سرویس هوشمند را بررسی کنید و دوباره تلاش کنید."
+                )
+            } finally {
+                // Never leave the chat spinner active after a failed or cancelled turn.
+                _uiState.value = _uiState.value.copy(isAiParsing = false)
             }
         }
     }

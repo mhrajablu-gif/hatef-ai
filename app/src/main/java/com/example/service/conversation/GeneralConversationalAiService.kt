@@ -5,6 +5,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -46,8 +47,13 @@ class GeneralConversationalAiService {
                 return withTimeout(20_000L) {
                     executeOnlineTurn(trimmed, recentHistory, userContextSummary)
                 }
+            } catch (e: TimeoutCancellationException) {
+                // A request timeout is a recoverable service failure, not cancellation of the parent UI.
+                lastException = e
+                Log.w(TAG, "Gemini request timed out after 20 seconds; returning a controlled fallback.")
+                break
             } catch (e: CancellationException) {
-                // Cooperative coroutine cancellation must NEVER be swallowed
+                // Preserve cancellation initiated by the caller or lifecycle.
                 throw e
             } catch (e: Exception) {
                 lastException = e
@@ -168,7 +174,15 @@ class GeneralConversationalAiService {
      * Local offline Persian conversational and knowledge fallback covering
      * technology, science, productivity, health, psychology, and general reasoning.
      */
-    fun getOfflineKnowledgeReply(input: String): String {
+    fun getOfflineKnowledgeReply(input: String): String? {
+        val normalized = input.trim().lowercase()
+        if (normalized.startsWith("سلام") || normalized.startsWith("درود") ||
+            normalized.contains("صبح بخیر") || normalized.contains("عصر بخیر") ||
+            normalized.contains("شب بخیر") || normalized.contains("حالت چطوره") ||
+            normalized.contains("خوبی") || normalized.contains("چطوری")
+        ) {
+            return "سلام! ممنون که پرسیدی. من آماده‌ام باهات گفتگو کنم یا در انجام کارهات کمکت کنم."
+        }
         val direct = checkDirectAdvisoryOrRoutine(input)
         if (direct != null) return direct
 
@@ -233,8 +247,7 @@ class GeneralConversationalAiService {
             lower.contains("کی هستی") || lower.contains("چه کارهایی بلدی") || lower.contains("راهنما") ->
                 "من «یادت» هستم؛ دستیار هوشمند شما با قابلیت‌های جامع:\n۱. پاسخ به پرسش‌های عمومی، علمی، فناوری، برنامه‌ریزی و ایده‌پردازی به زبان فارسی.\n۲. مدیریت هوشمند تمام قرارها و یادآورها: ثبت، حذف تک‌تک یا همگی («همه رو حذف کن»)، جابجایی («ساعت رو بکن ۱۰»)، و جلو/عقب انداختن.\n۳. تغییر تنظیمات برنامه با فرمان صوتی یا متنی («تم رو تاریک کن»، «پیش‌اعلان رو بکن ۳۰ دقیقه»).\n۴. حافظه بلندمدت برای به خاطر سپردن عادات و ساعات خواب و بیداری شما."
 
-            else ->
-                "من سوال یا دیدگاه شما را بررسی کردم. در تمام زمینه‌های برنامه‌ریزی، مدیریت یادآورها، دانش عمومی، علوم و فناوری در خدمت شما هستم. اگر مایلید جزئیات بیشتری درباره موضوع بفرمایید، با کمال میل با شما گفتگو و راهنمایی خواهم کرد."
+            else -> null
         }
     }
 }

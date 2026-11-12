@@ -63,19 +63,8 @@ class ConversationalAiEngine(
             return handleCorrection(cleanInput, currentState, referenceTimeMillis, timeZone)
         }
 
-        // 3. Check for casual conversation / chit-chat / greetings ("سلام، حالت چطوره؟")
-        val chitChatReply = checkChitChatOrGreeting(cleanInput)
-        if (chitChatReply != null) {
-            return ConversationalResponse(
-                replyText = chitChatReply.first,
-                newState = currentState.copy(
-                    activeIntent = ConversationIntent.GREETING_OR_CHITCHAT,
-                    awaitingField = AwaitingField.NONE,
-                    slotStatus = SlotFillingStatus.IDLE
-                ),
-                suggestedReplies = chitChatReply.second
-            )
-        }
+        // 3. Greetings and casual conversation are routed to the conversational model
+        // below, so replies can use conversation history instead of repeating a fixed template.
 
         // 4. Check for consultation & reasoning questions ("به نظرت ورزش ساعت ۱۲ شب خوبه؟", "من فردا ساعت ۸ بیدار میشم به نظرت چه ساعتی ورزش کنم؟", "میخوام هر روز ۴ ساعت بخوابم")
         if (isConsultationOrAdviceQuestion(cleanInput)) {
@@ -133,10 +122,11 @@ class ConversationalAiEngine(
                 recentHistory = recentHistory,
                 userContextSummary = toolRegistry?.getUserMemoryPreferences()?.message
             )
+            val isGreeting = checkChitChatOrGreeting(cleanInput) != null
             return ConversationalResponse(
                 replyText = generalReply,
                 newState = currentState.copy(
-                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    activeIntent = if (isGreeting) ConversationIntent.GREETING_OR_CHITCHAT else ConversationIntent.INFORMATIONAL_QA,
                     awaitingField = AwaitingField.NONE,
                     slotStatus = SlotFillingStatus.IDLE
                 ),
