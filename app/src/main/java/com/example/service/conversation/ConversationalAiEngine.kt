@@ -122,10 +122,11 @@ class ConversationalAiEngine(
                 recentHistory = recentHistory,
                 userContextSummary = toolRegistry?.getUserMemoryPreferences()?.message
             )
+            val isGreeting = checkChitChatOrGreeting(cleanInput) != null
             return ConversationalResponse(
                 replyText = generalReply,
                 newState = currentState.copy(
-                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    activeIntent = if (isGreeting) ConversationIntent.GREETING_OR_CHITCHAT else ConversationIntent.INFORMATIONAL_QA,
                     awaitingField = AwaitingField.NONE,
                     slotStatus = SlotFillingStatus.IDLE
                 ),
