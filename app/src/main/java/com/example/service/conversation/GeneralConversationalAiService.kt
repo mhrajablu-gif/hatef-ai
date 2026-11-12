@@ -5,6 +5,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -46,8 +47,13 @@ class GeneralConversationalAiService {
                 return withTimeout(20_000L) {
                     executeOnlineTurn(trimmed, recentHistory, userContextSummary)
                 }
+            } catch (e: TimeoutCancellationException) {
+                // A request timeout is a recoverable service failure, not cancellation of the parent UI.
+                lastException = e
+                Log.w(TAG, "Gemini request timed out after 20 seconds; returning a controlled fallback.")
+                break
             } catch (e: CancellationException) {
-                // Cooperative coroutine cancellation must NEVER be swallowed
+                // Preserve cancellation initiated by the caller or lifecycle.
                 throw e
             } catch (e: Exception) {
                 lastException = e
