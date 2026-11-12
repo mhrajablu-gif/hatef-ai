@@ -175,6 +175,14 @@ class GeneralConversationalAiService {
      * technology, science, productivity, health, psychology, and general reasoning.
      */
     fun getOfflineKnowledgeReply(input: String): String? {
+        val normalized = input.trim().lowercase()
+        if (normalized.startsWith("سلام") || normalized.startsWith("درود") ||
+            normalized.contains("صبح بخیر") || normalized.contains("عصر بخیر") ||
+            normalized.contains("شب بخیر") || normalized.contains("حالت چطوره") ||
+            normalized.contains("خوبی") || normalized.contains("چطوری")
+        ) {
+            return "سلام! ممنون که پرسیدی. من آماده‌ام باهات گفتگو کنم یا در انجام کارهات کمکت کنم."
+        }
         val direct = checkDirectAdvisoryOrRoutine(input)
         if (direct != null) return direct
 
