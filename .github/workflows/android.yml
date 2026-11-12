@@ -73,3 +73,5 @@ jobs:
           name: Yadet-APK
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+# Re-run build after Firebase repository secret setup.
