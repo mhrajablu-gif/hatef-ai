@@ -39,13 +39,13 @@ jobs:
 
       - name: Restore Firebase configuration
         env:
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          if [ -z "$GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "::error::Missing GOOGLE_SERVICES_JSON_BASE64 repository secret. Add the Base64-encoded app/google-services.json from Firebase Console."
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "::error::Missing GOOGLE_SERVICES_JSON repository secret. Add the complete app/google-services.json contents from Firebase Console."
             exit 1
           fi
-          printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > app/google-services.json
+          printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
           python3 -c "import json; d=json.load(open('app/google-services.json')); assert any(c.get('client_info',{}).get('android_client_info',{}).get('package_name') == 'com.aistudio.hatefassistant.pxkrmq' for c in d.get('client',[])), 'Firebase config package name does not match the Android applicationId'"
           echo "Firebase configuration restored and package name verified."
 
