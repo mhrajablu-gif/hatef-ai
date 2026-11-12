@@ -1,7 +1,6 @@
 package com.example.service.ai
 
 import android.content.Context
-import android.content.Intent
 import android.util.Log
 import com.example.BuildConfig
 import com.google.firebase.FirebaseApp
@@ -10,42 +9,27 @@ import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
 import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
 
 private const val TAG = "AppCheckInit"
-private const val DEBUG_TOKEN_EXTRA = "FIREBASE_APPCHECK_DEBUG_TOKEN"
-private const val DEBUG_STORE_PREFIX = "com.google.firebase.appcheck.debug.store."
-private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_SECRET"
 
 /**
  * Initializes App Check before any Firebase product SDK is used.
- * Debug builds use the debug provider; release builds use the Play Integrity
- * provider registered for this Android app in the Firebase console.
+ * Debug builds use Firebase's debug provider; release builds use Play Integrity.
+ *
+ * The debug provider prints its generated token to Logcat. Register that token
+ * in Firebase Console > App Check > Manage debug tokens. Do not hard-code or
+ * persist tokens using private Firebase SDK preference keys.
  */
-fun configureAppCheck(context: Context, intent: Intent?) {
+fun configureAppCheck(context: Context) {
     try {
         if (FirebaseApp.getApps(context).isEmpty()) {
-            FirebaseApp.initializeApp(context)
+            val initializedApp = FirebaseApp.initializeApp(context)
+            if (initializedApp == null) {
+                Log.e(TAG, "Firebase is not configured: google-services.json is missing or invalid.")
+                return
+            }
         }
 
         val appCheck = FirebaseAppCheck.getInstance()
         if (BuildConfig.DEBUG) {
-            val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)
-            if (!debugToken.isNullOrEmpty()) {
-                val persistenceKey = FirebaseApp.getInstance().persistenceKey
-                val prefs = context.getSharedPreferences(
-                    "$DEBUG_STORE_PREFIX$persistenceKey",
-                    Context.MODE_PRIVATE
-                )
-                val saved = prefs.edit()
-                    .putString(DEBUG_SECRET_KEY, debugToken)
-                    .commit()
-                if (!saved) {
-                    Log.e(TAG, "Failed to persist App Check debug token.")
-                } else {
-                    Log.d(TAG, "App Check debug token configured.")
-                }
-            } else {
-                Log.w(TAG, "No debug token supplied; the SDK may generate one for registration.")
-            }
-
             appCheck.installAppCheckProviderFactory(
                 DebugAppCheckProviderFactory.getInstance()
             )
