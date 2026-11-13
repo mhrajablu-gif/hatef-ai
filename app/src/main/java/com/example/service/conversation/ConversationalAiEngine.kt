@@ -343,11 +343,44 @@ class ConversationalAiEngine(
         )
     }
 
+    private fun placeholderTimestampForDate(
+        jalaliDateText: String?,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): Long {
+        val current = Calendar.getInstance(timeZone).apply { timeInMillis = referenceTimeMillis }
+        val parts = jalaliDateText?.let { PersianDateEngine.toEnglishDigits(it).split("/") }
+        if (parts != null && parts.size == 3) {
+            val year = parts[0].toIntOrNull()
+            val month = parts[1].toIntOrNull()
+            val day = parts[2].toIntOrNull()
+            if (year != null && month != null && day != null) {
+                return PersianDateEngine.jalaliToTimestamp(year, month, day, current.get(Calendar.HOUR_OF_DAY), current.get(Calendar.MINUTE), timeZone)
+            }
+        }
+        return referenceTimeMillis
+    }
+
     /**
      * Proceeds to confirmation or asks remaining slot if incomplete
      */
     private fun proceedToConfirmationOrCompletion(task: ParsedTask, state: ConversationState): ConversationalResponse {
-        // If still missing title:
+        if (task.isAmbiguous || task.hasAmbiguousTimePeriod) {
+            val hour = task.timeText.substringBefore(":")
+            val q = "منظورتان ساعت $hour صبح است یا شب؟"
+            return ConversationalResponse(
+                replyText = task.clarificationQuestion ?: q,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
+                    draftTask = task,
+                    awaitingField = AwaitingField.AMBIGUOUS_HOUR_AM_PM,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    lastAssistantQuestion = task.clarificationQuestion ?: q
+                ),
+                suggestedReplies = listOf("ساعت $hour صبح", "ساعت $hour شب")
+            )
+        }
+
         if (!task.hasExplicitTitle || isGenericSubject(task.title)) {
             val q = "برای ${task.jalaliDateText} ساعت ${task.timeText}، چه کاری رو باید یادتون بندازم؟"
             return ConversationalResponse(
@@ -363,9 +396,15 @@ class ConversationalAiEngine(
             )
         }
 
-        // If still missing time or date:
-        if (!task.hasExplicitTime && !task.hasExplicitDate) {
-            val q = "چه روز و ساعتی یادآوری «${task.title}» رو ثبت کنم؟"
+        // Never ask for confirmation until both date and time are explicitly resolved.
+        if (!task.hasExplicitTime || !task.hasExplicitDate) {
+            val missingDate = !task.hasExplicitDate
+            val missingTime = !task.hasExplicitTime
+            val q = when {
+                missingDate && missingTime -> "چه روز و ساعتی یادآوری «${task.title}» رو ثبت کنم؟"
+                missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «${task.title}» چه روزی باشد؟"
+                else -> "تاریخ مشخص است؛ یادآوری «${task.title}» را چه ساعتی تنظیم کنم؟"
+            }
             return ConversationalResponse(
                 replyText = q,
                 newState = state.copy(
@@ -375,11 +414,14 @@ class ConversationalAiEngine(
                     slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
                     lastAssistantQuestion = q
                 ),
-                suggestedReplies = listOf("فردا ساعت ۱۰ صبح", "امروز ساعت ۶ عصر", "نیم ساعت دیگه")
+                suggestedReplies = when {
+                    missingDate && missingTime -> listOf("نیم ساعت دیگه", "فردا ساعت ۹ صبح", "امروز ساعت ۱۸:۰۰")
+                    missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+                    else -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+                }
             )
         }
 
-        // If everything is clear, request confirmation
         val confirmMsg = "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} تنظیم بشه؟"
         val card = ConversationActionCard(
             type = ActionCardType.PREVIEW_NEW_REMINDER,
@@ -387,7 +429,6 @@ class ConversationalAiEngine(
             primaryActionLabel = "آره، ثبت کن",
             secondaryActionLabel = "لغو"
         )
-
         return ConversationalResponse(
             replyText = confirmMsg,
             newState = state.copy(
