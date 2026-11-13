@@ -14,10 +14,13 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.db.AppDatabase
+import com.example.data.model.ReminderEntity
 import com.example.data.engine.PersianDateEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.TimeZone
 
 class ReminderReceiver : BroadcastReceiver() {
 
@@ -47,6 +50,17 @@ class ReminderReceiver : BroadcastReceiver() {
                 val soundUriStr = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_SOUND_URI)
                 val isAdvance = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_ADVANCE, false)
                 showNotification(context, reminderId, title, desc, time, soundUriStr, isAdvance)
+                // Only the due alarm advances a recurring series; advance notifications do not.
+                if (!isAdvance && reminderId > 0L) {
+                    val pendingResult = goAsync()
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            scheduleNextOccurrence(context, reminderId)
+                        } finally {
+                            pendingResult.finish()
+                        }
+                    }
+                }
             }
 
             AlarmScheduler.ACTION_COMPLETE_REMINDER -> {
@@ -97,6 +111,75 @@ class ReminderReceiver : BroadcastReceiver() {
                 }
             }
         }
+    }
+
+    /**
+     * Keep each occurrence as a separate Room row so completion history remains intact.
+     */
+    private suspend fun scheduleNextOccurrence(context: Context, reminderId: Long) {
+        val db = AppDatabase.getDatabase(context)
+        val current = db.reminderDao().getReminderById(reminderId) ?: return
+        if (current.repeatType.equals("NONE", ignoreCase = true) || current.isCompleted) return
+
+        val nextTimestamp = calculateNextOccurrence(current) ?: return
+        if (current.recurrenceEndDate != null && nextTimestamp > current.recurrenceEndDate) return
+
+        val zone = TimeZone.getTimeZone("Asia/Tehran")
+        val nextJalali = PersianDateEngine.timestampToJalali(nextTimestamp, zone)
+        val next = current.copy(
+            id = 0L,
+            triggerTimestamp = nextTimestamp,
+            jalaliDateText = nextJalali.formatPersianNumeric(),
+            timeText = PersianDateEngine.formatPersianTime(nextJalali.hour, nextJalali.minute),
+            isCompleted = false,
+            completedAt = null,
+            createdAt = System.currentTimeMillis()
+        )
+        val newId = db.reminderDao().insert(next)
+        AlarmScheduler.scheduleReminder(context, next.copy(id = newId))
+    }
+
+    private fun calculateNextOccurrence(reminder: ReminderEntity): Long? {
+        val zone = TimeZone.getTimeZone("Asia/Tehran")
+        val calendar = Calendar.getInstance(zone).apply {
+            timeInMillis = reminder.triggerTimestamp
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        when (reminder.repeatType.uppercase()) {
+            "DAILY" -> calendar.add(Calendar.DAY_OF_YEAR, 1)
+            "WEEKLY" -> {
+                val days = reminder.recurrenceDaysOfWeek
+                    ?.split(",")?.map { it.trim().uppercase() }?.filter { it.isNotEmpty() }
+                if (days.isNullOrEmpty() || days.contains("EVEN_DAYS")) {
+                    calendar.add(Calendar.DAY_OF_YEAR, 7)
+                } else {
+                    val names = mapOf(
+                        Calendar.SATURDAY to "SAT", Calendar.SUNDAY to "SUN",
+                        Calendar.MONDAY to "MON", Calendar.TUESDAY to "TUE",
+                        Calendar.WEDNESDAY to "WED", Calendar.THURSDAY to "THU",
+                        Calendar.FRIDAY to "FRI"
+                    )
+                    var found = false
+                    repeat(7) {
+                        if (!found) {
+                            calendar.add(Calendar.DAY_OF_YEAR, 1)
+                            if (names[calendar.get(Calendar.DAY_OF_WEEK)] in days) found = true
+                        }
+                    }
+                    if (!found) return null
+                }
+            }
+            "MONTHLY" -> calendar.add(Calendar.MONTH, 1)
+            "YEARLY" -> calendar.add(Calendar.YEAR, 1)
+            "WORKDAYS" -> {
+                do {
+                    calendar.add(Calendar.DAY_OF_YEAR, 1)
+                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.FRIDAY)
+            }
+            else -> return null
+        }
+        return calendar.timeInMillis
     }
 
     private fun showNotification(
