@@ -413,7 +413,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun parseSpokenCommand(text: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true, activeClarification = null)
-            val parsedList = aiParser.parseCommand(text)
+            try {
+                val parsedList = aiParser.parseCommand(text)
 
             // Check if clarification is needed on any extracted task
             val taskNeedingClarification = parsedList.firstOrNull { it.needsClarification }
@@ -476,6 +477,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     parsedTasksPreview = parsedList,
                     activeClarification = null
                 )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Voice command parsing failed", e)
+                _uiState.value = _uiState.value.copy(
+                    activeClarification = null,
+                    infoMessage = "در تحلیل فرمان صوتی مشکلی پیش آمد. لطفاً دوباره تلاش کنید."
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(isAiParsing = false)
             }
         }
     }
