@@ -71,6 +71,7 @@ class GeneralConversationalAiService {
 
         // Local canned knowledge must never look like a successful Gemini response.
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
+        val diagnosticDetails = safeDiagnosticDetails(failure)
         val diagnosticNotice = buildString {
             append("\n\n")
             append("توجه: اتصال Gemini برقرار نشد؛ ")
@@ -78,6 +79,10 @@ class GeneralConversationalAiService {
             append("کد تشخیص: ")
             append(failureType)
             if (failure is TimeoutCancellationException) append(" (TIMEOUT)")
+            if (!diagnosticDetails.isNullOrBlank()) {
+                append("\nجزئیات فنی: ")
+                append(diagnosticDetails)
+            }
         }
         if (offlineFallback != null) {
             return offlineFallback + diagnosticNotice
@@ -85,6 +90,27 @@ class GeneralConversationalAiService {
 
         // Honest error reporting when no response could be generated; never mask as fake Gemini reply.
         return "متأسفانه در حال حاضر امکان برقراری ارتباط با Gemini وجود ندارد. لطفاً بعداً دوباره تلاش کنید." + diagnosticNotice
+    }
+
+    /**
+     * Exposes a short, sanitized server diagnostic so failures can be distinguished
+     * (for example App Check rejection, invalid API key, disabled API, or quota).
+     * Never include request headers, tokens, or full stack traces in chat UI.
+     */
+    private fun safeDiagnosticDetails(error: Throwable?): String? {
+        if (error == null) return null
+        val raw = generateSequence(error) { it.cause }
+            .take(3)
+            .mapNotNull { it.message?.trim()?.takeIf(String::isNotBlank) }
+            .distinct()
+            .joinToString(" | ")
+        if (raw.isBlank()) return null
+
+        return raw
+            .replace(Regex("(?i)AIza[0-9A-Za-z_-]{20,}"), "[کلید مخفی حذف شد]")
+            .replace(Regex("(?i)Bearer\\s+[A-Za-z0-9._~-]+"), "Bearer [توکن حذف شد]")
+            .replace(Regex("[\\r\\n\\t]+"), " ")
+            .take(360)
     }
 
     private suspend fun executeOnlineTurn(
