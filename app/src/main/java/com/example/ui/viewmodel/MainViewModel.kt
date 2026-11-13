@@ -502,6 +502,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             ClarificationType.MISSING_TIME_OR_DATE -> {
                 val extracted = PersianDateEngine.extractPersianTask(cleanResponse)
                 val responseAnalysis = com.example.service.ai.PersianCommandAnalyzer.analyze(cleanResponse)
+                if (responseAnalysis.validationStatus == com.example.service.ai.ValidationStatus.CONFLICT) {
+                    val conflictPrompt = responseAnalysis.clarificationQuestion ?: "تاریخ‌های گفته‌شده با هم سازگار نیستند؛ لطفاً تاریخ را روشن کنید."
+                    _uiState.value = _uiState.value.copy(
+                        activeClarification = prompt.copy(question = conflictPrompt, quickSuggestions = responseAnalysis.quickSuggestions),
+                        infoMessage = conflictPrompt
+                    )
+                    ttsSpeaker.speak(conflictPrompt)
+                    return
+                }
                 val responseAmbiguousTime =
                     responseAnalysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
                 val relativePhrase = extracted.rawTimePhrase
