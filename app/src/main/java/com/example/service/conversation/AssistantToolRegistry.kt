@@ -42,6 +42,22 @@ class AssistantToolRegistry(
      * Tool 1: Create a new reminder / appointment in Room DB and schedule exact alarm.
      */
     suspend fun createReminder(task: ParsedTask): ToolResult {
+        if (!task.hasExplicitTitle || task.title.isBlank()) {
+            return ToolResult(
+                success = false,
+                message = "عنوان یادآور هنوز مشخص نشده است؛ لطفاً عنوان دقیق را بپرسید. هیچ یادآوری ذخیره نشد.",
+                errorCode = "MISSING_TITLE"
+            )
+        }
+
+        if (!task.hasExplicitDate || !task.hasExplicitTime || task.isAmbiguous || task.hasAmbiguousTimePeriod) {
+            return ToolResult(
+                success = false,
+                message = "تاریخ و ساعت یادآور هنوز به‌طور کامل مشخص نشده‌اند. ابتدا اطلاعات ناقص را از کاربر بپرسید؛ هیچ یادآوری ذخیره نشد.",
+                errorCode = "INCOMPLETE_DATE_TIME"
+            )
+        }
+
         if (task.title.isBlank()) {
             return ToolResult(
                 success = false,
