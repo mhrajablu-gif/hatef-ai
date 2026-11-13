@@ -10,7 +10,8 @@ class ParsedTaskClarificationTest {
         hasTime: Boolean,
         hasDate: Boolean,
         rawTimePhrase: String = "",
-        ambiguous: Boolean = false
+        ambiguous: Boolean = false,
+        hasTitle: Boolean = true
     ) = ParsedTask(
         title = "خرید نان",
         triggerTimestamp = 1_800_000_000_000L,
@@ -19,6 +20,7 @@ class ParsedTaskClarificationTest {
         rawTimePhrase = rawTimePhrase,
         hasExplicitTime = hasTime,
         hasExplicitDate = hasDate,
+        hasExplicitTitle = hasTitle,
         isAmbiguous = ambiguous
     )
 
@@ -46,6 +48,13 @@ class ParsedTaskClarificationTest {
             hasDate = true,
             ambiguous = true
         )
+        assertTrue(ambiguous.hasAmbiguousTimePeriod)
+        assertTrue(ambiguous.needsClarification)
+    }
+
+    @Test
+    fun ambiguousHourStillRequiresAmPmClarificationWhenTitleIsMissing() {
+        val ambiguous = task(hasTime = true, hasDate = true, ambiguous = true, hasTitle = false)
         assertTrue(ambiguous.hasAmbiguousTimePeriod)
         assertTrue(ambiguous.needsClarification)
     }
