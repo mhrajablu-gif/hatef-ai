@@ -554,7 +554,6 @@ class ConversationalAiEngineTest {
             currentState = ConversationState(),
             referenceTimeMillis = fixedReferenceMillis
         )
-        println("TEST23 bulk-delete: activeIntent=${turn.newState.activeIntent}, executedSuccess=${turn.executedResult?.success}, reply=${turn.replyText}")
         assertFalse("حذف گروهی بدون ابزار نباید موفق باشد", turn.executedResult?.success ?: true)
         assertTrue("باید نبود سرویس را اعلام کند: ${turn.replyText}", turn.replyText.contains("سرویس یادآورها"))
         assertFalse("نباید پیام حذف موفق بدهد: ${turn.replyText}", turn.replyText.contains("حذف شدند"))
