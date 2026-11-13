@@ -65,8 +65,8 @@ class GeneralConversationalAiService {
             return offlineFallback
         }
 
-        // Honest error reporting when no response could be generated; never mask as fake Gemini reply
-        return "متأسفانه در حال حاضر امکان برقراری ارتباط با دستیار هوشمند وجود ندارد. لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید."
+        // Never disguise a failed AI request as a generic answer that pretends to understand.
+        return "پیامتان دریافت شد، اما در حال حاضر ارتباط با هوش مصنوعی برقرار نشد؛ بنابراین نمی‌خواهم پاسخ حدسی یا نامرتبط بدهم. لطفاً اتصال اینترنت را بررسی کنید و دوباره تلاش کنید."
     }
 
     private suspend fun executeOnlineTurn(
