@@ -513,7 +513,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 val responseAmbiguousTime =
                     responseAnalysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
-                val relativePhrase = extracted.rawTimePhrase
                 val resolvedRelativeDateTime = responseAnalysis.hasExplicitDate && responseAnalysis.hasExplicitTime && responseAnalysis.targetTimestamp != null
                 val extractedHasDate = extracted.hasExplicitDate || responseAnalysis.hasExplicitDate || resolvedRelativeDateTime
                 val hasDate = tentative.hasExplicitDate || extractedHasDate
