@@ -328,24 +328,29 @@ class ConversationalAiEngineTest {
         state = turn1.newState
         assertEquals(ConversationIntent.GREETING_OR_CHITCHAT, state.activeIntent)
 
-        // Turn 2
+        // Turn 2: ۹ without AM/PM is ambiguous, so ask before collecting the title.
         val turn2 = engine.processTurn("فردا ساعت ۹ یادم بنداز", state, emptyList(), fixedReferenceMillis)
         state = turn2.newState
+        assertEquals(AwaitingField.AMBIGUOUS_HOUR_AM_PM, state.awaitingField)
+
+        // Turn 3: Resolve the AM/PM ambiguity.
+        val turn3 = engine.processTurn("صبح", state, emptyList(), fixedReferenceMillis)
+        state = turn3.newState
         assertEquals(AwaitingField.TITLE, state.awaitingField)
 
-        // Turn 3
-        val turn3 = engine.processTurn("جلسه با تیم فنی", state, emptyList(), fixedReferenceMillis)
-        state = turn3.newState
+        // Turn 4: Supply the task title.
+        val turn4 = engine.processTurn("جلسه با تیم فنی", state, emptyList(), fixedReferenceMillis)
+        state = turn4.newState
         assertEquals(AwaitingField.EXECUTION_CONFIRMATION, state.awaitingField)
         assertEquals("جلسه با تیم فنی", state.draftTask?.title)
         assertEquals("۰۹:۰۰", state.draftTask?.timeText)
 
-        // Turn 4
-        val turn4 = engine.processTurn("آره درسته ثبت کن", state, emptyList(), fixedReferenceMillis)
-        assertEquals(SlotFillingStatus.AWAITING_CONFIRMATION, turn4.newState.slotStatus)
-        assertTrue(turn4.replyText.contains("سرویس ثبت یادآور"))
-        assertNotNull("پیش‌نویس باید برای تلاش مجدد حفظ شود", turn4.newState.draftTask)
-        assertFalse(turn4.replyText.contains("با موفقیت تنظیم شد"))
+        // Turn 5: The test engine has no database tool, so it must report failure honestly.
+        val turn5 = engine.processTurn("آره درسته ثبت کن", state, emptyList(), fixedReferenceMillis)
+        assertEquals(SlotFillingStatus.AWAITING_CONFIRMATION, turn5.newState.slotStatus)
+        assertTrue(turn5.replyText.contains("سرویس ثبت یادآور"))
+        assertNotNull("پیش‌نویس باید برای تلاش مجدد حفظ شود", turn5.newState.draftTask)
+        assertFalse(turn5.replyText.contains("با موفقیت تنظیم شد"))
     }
 
     /**
