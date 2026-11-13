@@ -783,7 +783,13 @@ class ConversationalAiEngine(
         }
 
         // 6. Delete reference or ambiguous delete command ("قرارم رو حذف کن", "قرار رو حذف کن", "حذفش کن", "پاک کن")
-        if (lower.contains("حذف کن") || lower.contains("پاک کن") || lower.contains("لغو کن")) {
+        // Bulk deletion must be handled by the bulk-action parser below, not mistaken for a request
+        // to identify one specific reminder.
+        val isBulkDeleteRequest =
+            (lower.contains("همه") || lower.contains("تمام") || lower.contains("کلیه")) &&
+            (lower.contains("یادآور") || lower.contains("آلارم") || lower.contains("رویداد") || lower.contains("قرار") || lower.contains("هشدار")) &&
+            (lower.contains("حذف") || lower.contains("پاک") || lower.contains("لغو") || lower.contains("کنسل"))
+        if (!isBulkDeleteRequest && (lower.contains("حذف کن") || lower.contains("پاک کن") || lower.contains("لغو کن"))) {
             val targetId = state.lastMentionedReminderId ?: state.targetReminderId
             if (targetId != null && toolRegistry != null) {
                 val res = toolRegistry.deleteOrCancelReminder(targetId, isHardDelete = true)
