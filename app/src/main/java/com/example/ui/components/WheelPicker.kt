@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.engine.PersianDateEngine
+import java.util.Locale
 import com.example.ui.theme.TealAccent
 import com.example.ui.theme.TealPrimary
 
@@ -47,7 +48,7 @@ fun WheelDrawerPicker(
     onValueChange: (Int) -> Unit,
     label: String,
     modifier: Modifier = Modifier,
-    formatItem: (Int) -> String = { PersianDateEngine.toPersianDigits(String.format("%02d", it)) }
+    formatItem: (Int) -> String = { PersianDateEngine.toPersianDigits(String.format(Locale.ROOT, "%02d", it)) }
 ) {
     val currentIndex = range.indexOf(value).coerceAtLeast(0)
     var dragAccumulator by remember { mutableFloatStateOf(0f) }
