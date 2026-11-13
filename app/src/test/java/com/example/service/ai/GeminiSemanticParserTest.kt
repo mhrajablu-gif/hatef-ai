@@ -24,6 +24,14 @@ class GeminiSemanticParserTest {
     }
 
     @Test
+    fun fallbackFlagsAmbiguousTimeEvenWithoutDate() {
+        val task = parser.fallbackPersianParse("ساعت ۶ یادم بنداز برم بانک", referenceTime).first()
+        assertTrue(task.hasExplicitTime)
+        assertFalse(task.hasExplicitDate)
+        assertTrue(task.hasAmbiguousTimePeriod)
+        assertTrue(task.needsClarification)
+    }
+    @Test
     fun fallbackResolvesRelativeDurationAsDateAndTime() {
         val task = parser.fallbackPersianParse("نیم ساعت دیگه یادم بنداز آب بخورم", referenceTime).first()
         assertTrue(task.hasExplicitDate)
