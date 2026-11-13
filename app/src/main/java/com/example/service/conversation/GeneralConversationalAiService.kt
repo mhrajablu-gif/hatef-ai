@@ -17,7 +17,7 @@ import kotlinx.coroutines.withTimeout
 class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
-    private fun createModel(userContextSummary: String?): com.google.firebase.ai.GenerativeModel {
+    private fun createModel(userContextSummary: String?) =
         return Firebase.ai.generativeModel(
             modelName = "gemini-3.8-flash",
             systemInstruction = content { text(buildSystemPrompt(userContextSummary)) }
