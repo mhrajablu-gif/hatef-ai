@@ -64,15 +64,27 @@ class GeneralConversationalAiService {
             }
         }
 
-        // When network/API is unreachable (e.g. offline mode or test environment), check for domain knowledge fallback
-        Log.e(TAG, "Online Gemini AI communication failed: ${lastException?.message}", lastException)
+        // Keep diagnostics useful without exposing request contents, credentials, or App Check tokens.
+        val failure = lastException
+        val failureType = failure?.javaClass?.simpleName ?: "UnknownException"
+        Log.e(TAG, "Online Gemini request failed. type=$failureType", failure)
+
+        // Local canned knowledge must never look like a successful Gemini response.
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
+        val diagnosticNotice = buildString {
+            append("\\n\\n")
+            append("توجه: اتصال Gemini برقرار نشد؛ ")
+            append("پاسخ بالا از بخش آفلاین برنامه است. ")
+            append("کد تشخیص: ")
+            append(failureType)
+            if (failure is TimeoutCancellationException) append(" (TIMEOUT)")
+        }
         if (offlineFallback != null) {
-            return offlineFallback
+            return offlineFallback + diagnosticNotice
         }
 
-        // Honest error reporting when no response could be generated; never mask as fake Gemini reply
-        return "متأسفانه در حال حاضر امکان برقراری ارتباط با دستیار هوشمند وجود ندارد. لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید."
+        // Honest error reporting when no response could be generated; never mask as fake Gemini reply.
+        return "متأسفانه در حال حاضر امکان برقراری ارتباط با Gemini وجود ندارد. لطفاً بعداً دوباره تلاش کنید." + diagnosticNotice
     }
 
     private suspend fun executeOnlineTurn(
