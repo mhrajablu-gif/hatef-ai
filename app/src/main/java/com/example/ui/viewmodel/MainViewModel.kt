@@ -604,6 +604,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    private fun alarmScheduleMessage(
+        result: com.example.service.alarm.AlarmScheduleResult,
+        title: String
+    ): String? = when (result) {
+        com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> null
+        com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED ->
+            "یادآور «$title» ذخیره شد، اما پیش‌اعلان آن تنظیم نشد."
+        com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE ->
+            "یادآور «$title» ذخیره شد، اما زمان انتخاب‌شده گذشته است؛ تاریخ و ساعت را اصلاح کن."
+        com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED ->
+            "یادآور «$title» ذخیره شد، اما زنگ آن تنظیم نشد. مجوز «هشدار دقیق» را از تنظیمات برنامه فعال کن."
+        com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+        com.example.service.alarm.AlarmScheduleResult.FAILED ->
+            "یادآور «$title» ذخیره شد، اما زمان‌بندی زنگ ناموفق بود. تنظیمات مجوز هشدار را بررسی کن."
+    }
+
     fun confirmPreviewTask(task: ParsedTask) {
         viewModelScope.launch {
             val context = getApplication<Application>()
