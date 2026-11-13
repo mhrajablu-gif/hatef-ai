@@ -57,7 +57,7 @@ class GeneralConversationalAiService {
                 throw e
             } catch (e: Exception) {
                 lastException = e
-                Log.w(TAG, "Gemini turn attempt $attempts failed: ${e.message}")
+                Log.w(TAG, "Gemini turn attempt $attempts failed. type=${e.javaClass.simpleName}")
                 if (attempts < maxAttempts) {
                     kotlinx.coroutines.delay(1000L)
                 }
@@ -72,7 +72,7 @@ class GeneralConversationalAiService {
         // Local canned knowledge must never look like a successful Gemini response.
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
         val diagnosticNotice = buildString {
-            append("\\n\\n")
+            append("\n\n")
             append("توجه: اتصال Gemini برقرار نشد؛ ")
             append("پاسخ بالا از بخش آفلاین برنامه است. ")
             append("کد تشخیص: ")
