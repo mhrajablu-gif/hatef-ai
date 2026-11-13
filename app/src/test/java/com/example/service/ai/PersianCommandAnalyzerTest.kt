@@ -385,4 +385,18 @@ class PersianCommandAnalyzerTest {
         assertFalse(result.title.contains("دقیقه"))
         assertNotNull(result.targetTimestamp)
     }
+
+    @Test
+    fun askingWhatWeekdayTodayIsIsNotParsedAsTodayPlusSaturdayConflict() {
+        val result = PersianCommandAnalyzer.analyze(
+            "امروز چند شنبه است؟",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertFalse("پرسش روز هفته نباید به‌عنوان تاریخ یادآور تفسیر شود", result.hasExplicitDate)
+        assertNull("نباید شنبه را به‌عنوان روز درخواستی استخراج کند", result.requestedWeekday)
+        assertTrue("پرسش اطلاعاتی نباید تعارض زمانی بسازد", result.validationStatus != ValidationStatus.CONFLICT)
+        assertNull(result.conflictMessage)
+    }
 }
