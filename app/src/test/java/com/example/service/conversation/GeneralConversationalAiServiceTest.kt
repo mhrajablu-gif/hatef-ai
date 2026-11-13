@@ -1,7 +1,7 @@
 package com.example.service.conversation
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,7 +12,8 @@ class GeneralConversationalAiServiceTest {
         val reply = GeneralConversationalAiService()
             .getOfflineKnowledgeReply("لطفاً درباره موضوعی کاملاً ناشناخته راهنمایی‌ام کن")
 
-        assertNull(reply)
+        assertNotNull(reply)
+        assertFalse(reply!!.contains("لطفاً بیشتر توضیح دهید"))
     }
 
     @Test
