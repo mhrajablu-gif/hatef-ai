@@ -277,6 +277,56 @@ class ConversationalAiEngine(
                 }
             }
 
+            AwaitingField.RESCHEDULE_OFFSET -> {
+                val offset = extractMinuteOffset(input)
+                val direction = state.pendingRescheduleDirection ?: 1
+                if (offset == null) {
+                    val question = if (direction > 0) {
+                        "چند دقیقه یا چند ساعت عقب بیندازم؟"
+                    } else {
+                        "چند دقیقه یا چند ساعت زودتر تنظیم کنم؟"
+                    }
+                    return ConversationalResponse(
+                        replyText = question,
+                        newState = state.copy(lastAssistantQuestion = question),
+                        suggestedReplies = listOf("۱۵ دقیقه", "نیم ساعت", "یک ساعت")
+                    )
+                }
+
+                val targetId = state.targetReminderId ?: state.lastMentionedReminderId
+                if (targetId == null) {
+                    val question = "کدام یادآور را تغییر بدهم؟"
+                    return ConversationalResponse(
+                        replyText = question,
+                        newState = state.copy(awaitingField = AwaitingField.NONE, pendingRescheduleDirection = null),
+                        suggestedReplies = listOf("مشاهده یادآورها")
+                    )
+                }
+                if (toolRegistry == null) {
+                    val message = "سرویس یادآورها در دسترس نیست؛ تغییر زمان انجام نشد و هیچ تغییری اعمال نشد."
+                    return ConversationalResponse(
+                        replyText = message,
+                        newState = state.copy(awaitingField = AwaitingField.NONE, pendingRescheduleDirection = null),
+                        suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                    )
+                }
+
+                val result = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offset * direction)
+                return ConversationalResponse(
+                    replyText = if (result.success) result.message else "تغییر زمان انجام نشد: ${result.message}",
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_REMINDER,
+                        awaitingField = AwaitingField.NONE,
+                        pendingRescheduleDirection = null,
+                        targetReminderId = targetId,
+                        lastMentionedReminderId = targetId,
+                        slotStatus = if (result.success) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE
+                    ),
+                    executedResult = result,
+                    suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
+                )
+            }
+
             AwaitingField.WHICH_REMINDER_TO_SELECT -> {
                 val selectedId = resolveCandidateSelection(input, state.candidateReminderIds)
                 if (selectedId != null) {
@@ -297,6 +347,23 @@ class ConversationalAiEngine(
                                     ),
                                     executedResult = delRes,
                                     suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                                )
+                            } else if (state.pendingRescheduleDirection != null) {
+                                val question = if (state.pendingRescheduleDirection > 0) {
+                                    "قرار «${reminder.title}» انتخاب شد. چند دقیقه یا ساعت عقب بیندازم؟"
+                                } else {
+                                    "قرار «${reminder.title}» انتخاب شد. چند دقیقه یا ساعت زودتر تنظیم کنم؟"
+                                }
+                                return ConversationalResponse(
+                                    replyText = question,
+                                    newState = state.copy(
+                                        targetReminderId = selectedId,
+                                        lastMentionedReminderId = selectedId,
+                                        awaitingField = AwaitingField.RESCHEDULE_OFFSET,
+                                        candidateReminderIds = emptyList(),
+                                        lastAssistantQuestion = question
+                                    ),
+                                    suggestedReplies = listOf("۱۵ دقیقه", "نیم ساعت", "یک ساعت")
                                 )
                             } else {
                                 return ConversationalResponse(
