@@ -135,7 +135,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "نسخه ۱.۰۴ | موتور تقویم، گفتار پیوسته و آلارم تمام صفحه",
+                            text = "نسخه ۱.۱۵ | موتور تقویم، گفتار پیوسته و آلارم تمام صفحه",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )

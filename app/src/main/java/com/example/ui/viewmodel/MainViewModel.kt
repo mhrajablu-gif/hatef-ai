@@ -242,31 +242,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
-            val response = conversationalEngine.processTurn(
-                userInput = clean,
-                currentState = _conversationState.value,
-                recentHistory = updatedHistory
-            )
-
-            _conversationState.value = response.newState
-
-            val assistantMsg = com.example.service.conversation.ChatMessage(
-                sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                text = response.replyText,
-                actionCard = response.actionCard,
-                suggestedReplies = response.suggestedReplies
-            )
-
-            _chatMessages.value = _chatMessages.value + assistantMsg
-            _uiState.value = _uiState.value.copy(isAiParsing = false)
-
-            // Speak response via TTS
-            ttsSpeaker.speak(response.replyText)
-
-            if (response.executedResult != null && response.executedResult.success) {
-                _uiState.value = _uiState.value.copy(
-                    infoMessage = response.executedResult.message
+            try {
+                val response = conversationalEngine.processTurn(
+                    userInput = clean,
+                    currentState = _conversationState.value,
+                    recentHistory = updatedHistory
                 )
+
+                _conversationState.value = response.newState
+
+                val assistantMsg = com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = response.replyText,
+                    actionCard = response.actionCard,
+                    suggestedReplies = response.suggestedReplies
+                )
+
+                _chatMessages.value = _chatMessages.value + assistantMsg
+
+                // Speak response via TTS
+                ttsSpeaker.speak(response.replyText)
+
+                if (response.executedResult != null && response.executedResult.success) {
+                    _uiState.value = _uiState.value.copy(
+                        infoMessage = response.executedResult.message
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Chat turn failed", e)
+                _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = "متأسفانه پاسخ این پیام دریافت نشد. اتصال اینترنت و وضعیت سرویس هوشمند را بررسی کنید و دوباره تلاش کنید."
+                )
+            } finally {
+                // Never leave the chat spinner active after a failed or cancelled turn.
+                _uiState.value = _uiState.value.copy(isAiParsing = false)
             }
         }
     }
@@ -289,21 +301,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         val entity = result.data as? ReminderEntity
                         val resultCard = card.copy(
-                            type = com.example.service.conversation.ActionCardType.EXECUTION_RESULT,
+                            type = if (result.success) {
+                                com.example.service.conversation.ActionCardType.EXECUTION_RESULT
+                            } else {
+                                com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER
+                            },
                             targetReminder = entity,
+                            primaryActionLabel = if (result.success) "انجام شد" else "تلاش دوباره",
+                            secondaryActionLabel = "لغو",
                             statusMessage = confirmReply
                         )
                         _conversationState.value = _conversationState.value.copy(
-                            slotStatus = com.example.service.conversation.SlotFillingStatus.COMPLETED,
-                            awaitingField = com.example.service.conversation.AwaitingField.NONE,
-                            draftTask = null,
-                            lastMentionedReminderId = entity?.id
+                            slotStatus = if (result.success) {
+                                com.example.service.conversation.SlotFillingStatus.COMPLETED
+                            } else {
+                                com.example.service.conversation.SlotFillingStatus.AWAITING_CONFIRMATION
+                            },
+                            awaitingField = if (result.success) {
+                                com.example.service.conversation.AwaitingField.NONE
+                            } else {
+                                com.example.service.conversation.AwaitingField.EXECUTION_CONFIRMATION
+                            },
+                            draftTask = if (result.success) null else task,
+                            lastMentionedReminderId = if (result.success) entity?.id else _conversationState.value.lastMentionedReminderId
                         )
                         val assistantMsg = com.example.service.conversation.ChatMessage(
                             sender = com.example.service.conversation.MessageSender.ASSISTANT,
                             text = confirmReply,
                             actionCard = resultCard,
-                            suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                            suggestedReplies = if (result.success) listOf("یادآور جدید", "مشاهده یادآورها") else listOf("آره، دوباره ثبت کن", "لغو")
                         )
                         _chatMessages.value = _chatMessages.value + assistantMsg
                         ttsSpeaker.speak(confirmReply)
