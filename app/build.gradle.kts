@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.hatefassistant.pxkrmq"
     minSdk = 24
     targetSdk = 36
-    versionCode = 18
-    versionName = "1.17"
+    versionCode = 19
+    versionName = "1.18"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
