@@ -682,6 +682,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 category = task.category,
                 priority = task.priority,
                 repeatType = task.repeatType,
+                recurrenceEndDate = task.recurrenceEndDate,
+                recurrenceDaysOfWeek = task.recurrenceDaysOfWeek,
                 advanceAlertMinutes = task.advanceAlertMinutes
             )
 
@@ -733,6 +735,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     category = task.category,
                     priority = task.priority,
                     repeatType = task.repeatType,
+                    recurrenceEndDate = task.recurrenceEndDate,
+                    recurrenceDaysOfWeek = task.recurrenceDaysOfWeek,
                     advanceAlertMinutes = task.advanceAlertMinutes
                 )
                 val id = repository.insert(entity)
