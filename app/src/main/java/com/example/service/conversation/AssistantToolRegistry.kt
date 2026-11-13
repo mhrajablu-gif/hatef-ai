@@ -29,6 +29,15 @@ class AssistantToolRegistry(
     private val defaultTimeZone: TimeZone = TimeZone.getTimeZone("Asia/Tehran")
 ) {
 
+    private fun alarmSchedulingWarning(result: com.example.service.alarm.AlarmScheduleResult, title: String): String? = when (result) {
+        com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> null
+        com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED -> "اطلاعات «$title» ذخیره شد، اما پیش‌اعلان آن تنظیم نشد."
+        com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE -> "اطلاعات «$title» ذخیره شد، اما زمان آن گذشته است و آلارمی تنظیم نشد."
+        com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED -> "اطلاعات «$title» ذخیره شد، اما زنگ آن تنظیم نشد؛ مجوز هشدار دقیق را از تنظیمات برنامه فعال کن."
+        com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+        com.example.service.alarm.AlarmScheduleResult.FAILED -> "اطلاعات «$title» ذخیره شد، اما زمان‌بندی زنگ ناموفق بود؛ مجوزهای هشدار را بررسی کن."
+    }
+
     /**
      * Tool 1: Create a new reminder / appointment in Room DB and schedule exact alarm.
      */
@@ -81,7 +90,7 @@ class AssistantToolRegistry(
         return try {
             val id = repository.insert(entity)
             val savedEntity = entity.copy(id = id)
-            AlarmScheduler.scheduleReminder(context, savedEntity)
+            val alarmWarning = alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, savedEntity), savedEntity.title)
 
             // Check for close time conflicts
             val conflict = repository.findConflictingReminder(task.triggerTimestamp, excludeId = id)
@@ -91,7 +100,7 @@ class AssistantToolRegistry(
 
             ToolResult(
                 success = true,
-                message = "یادآور «${savedEntity.title}» برای $finalDateText ساعت $finalTimeText با موفقیت ثبت شد$conflictNote.",
+                message = (alarmWarning ?: "یادآور «${savedEntity.title}» برای $finalDateText ساعت $finalTimeText با موفقیت ثبت شد$conflictNote.") + if (alarmWarning != null) conflictNote else "", 
                 data = savedEntity
             )
         } catch (e: Exception) {
@@ -210,14 +219,13 @@ class AssistantToolRegistry(
 
         return try {
             repository.update(updated)
-            // Re-schedule alarm to apply any time or advance alert updates
-            AlarmScheduler.cancelReminder(context, id)
-            if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
-                AlarmScheduler.scheduleReminder(context, updated)
-            }
+            // Re-schedule alarm to apply any time or advance-alert updates.
+            val alarmWarning = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
+                alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
+            } else null
             ToolResult(
                 success = true,
-                message = "یادآور «${updated.title}» با موفقیت ویرایش و اعلان آن به‌روزرسانی شد.",
+                message = alarmWarning ?: "یادآور «${updated.title}» با موفقیت ویرایش و اعلان آن به‌روزرسانی شد.",
                 data = updated
             )
         } catch (e: Exception) {
@@ -272,9 +280,8 @@ class AssistantToolRegistry(
                 timeText = finalTime,
                 isCompleted = false
             )
-            // Reschedule alarm
-            AlarmScheduler.cancelReminder(context, id)
-            AlarmScheduler.scheduleReminder(context, updated)
+            // Reschedule alarm and report permission failures without claiming it was set.
+            val alarmWarning = alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
 
             val desc = if (offsetMinutes != null) {
                 if (offsetMinutes > 0) "$offsetMinutes دقیقه به تعویق افتاد" else "${-offsetMinutes} دقیقه جلو کشیده شد"
@@ -284,7 +291,7 @@ class AssistantToolRegistry(
 
             ToolResult(
                 success = true,
-                message = "یادآور «${existing.title}» $desc و آلارم آن مجدداً تنظیم گردید.",
+                message = alarmWarning ?: "یادآور «${existing.title}» $desc و آلارم آن مجدداً تنظیم گردید.",
                 data = updated
             )
         } catch (e: Exception) {
@@ -354,10 +361,9 @@ class AssistantToolRegistry(
         val updated = existing.copy(advanceAlertMinutes = advanceAlertMinutes)
         return try {
             repository.update(updated)
-            AlarmScheduler.cancelReminder(context, id)
-            if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
-                AlarmScheduler.scheduleReminder(context, updated)
-            }
+            val alarmWarning = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
+                alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
+            } else null
             val alertDesc = if (advanceAlertMinutes > 0) {
                 "پیش‌اعلان $advanceAlertMinutes دقیقه قبل برای «${updated.title}» فعال شد."
             } else {
@@ -365,7 +371,7 @@ class AssistantToolRegistry(
             }
             ToolResult(
                 success = true,
-                message = alertDesc,
+                message = alarmWarning ?: alertDesc,
                 data = updated
             )
         } catch (e: Exception) {
@@ -394,7 +400,8 @@ class AssistantToolRegistry(
             if (isCompleted) {
                 AlarmScheduler.cancelReminder(context, id)
             } else if (existing.triggerTimestamp > System.currentTimeMillis()) {
-                AlarmScheduler.scheduleReminder(context, existing.copy(isCompleted = false))
+                val alarmWarning = alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, existing.copy(isCompleted = false)), existing.title)
+                if (alarmWarning != null) return ToolResult(success = true, message = alarmWarning, data = existing.copy(isCompleted = false))
             }
             val statusText = if (isCompleted) "انجام‌شده" else "در انتظار انجام"
             ToolResult(
