@@ -540,5 +540,36 @@ class ConversationalAiEngineTest {
         assertEquals("نیت باید INFORMATIONAL_QA باشد", ConversationIntent.INFORMATIONAL_QA, turn2.newState.activeIntent)
         assertTrue("پاسخ باید توضیح علمی پراکندگی نور باشد", turn1.replyText.isNotBlank())
     }
+
+    /**
+     * Calendar questions about tomorrow must be answered as information,
+     * without opening reminder creation or asking for a reminder time.
+     */
+    @Test
+    fun testCalendarQuestionsDoNotBecomeReminderRequests() = runBlocking {
+        val weekdayTurn = engine.processTurn(
+            userInput = "فردا چند شنبه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertTrue(weekdayTurn.replyText.contains("سه‌شنبه"))
+        assertNull(weekdayTurn.newState.draftTask)
+        assertFalse(weekdayTurn.newState.isWaitingForAnswer())
+
+        val dayOfMonthTurn = engine.processTurn(
+            userInput = "فردا چندمین روز ماه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertTrue(dayOfMonthTurn.replyText.contains("۵"))
+        assertTrue(dayOfMonthTurn.replyText.contains("آبان"))
+        assertNull(dayOfMonthTurn.newState.draftTask)
+        assertFalse(dayOfMonthTurn.newState.isWaitingForAnswer())
+    }
+
 }
 
