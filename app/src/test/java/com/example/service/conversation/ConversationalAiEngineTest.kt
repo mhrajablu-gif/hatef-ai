@@ -86,7 +86,7 @@ class ConversationalAiEngineTest {
             currentState = state,
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertEquals("وضعیت گفت‌وگو باید COMPLETED شود", SlotFillingStatus.COMPLETED, turn4.newState.slotStatus)
+        assertEquals("بدون ابزار ثبت، وضعیت عملیات باید قابل‌تلاش مجدد بماند", SlotFillingStatus.IDLE, turn4.newState.slotStatus)
         assertTrue("بدون ابزار ثبت، باید صادقانه عدم انجام عملیات را اعلام کند", turn4.replyText.contains("سرویس ثبت یادآور"))
         assertFalse("نباید موفقیت ساختگی اعلام شود", turn4.replyText.contains("با موفقیت تنظیم شد"))
     }
@@ -340,8 +340,9 @@ class ConversationalAiEngineTest {
 
         // Turn 4
         val turn4 = engine.processTurn("آره درسته ثبت کن", state, emptyList(), fixedReferenceMillis)
-        assertEquals(SlotFillingStatus.COMPLETED, turn4.newState.slotStatus)
-        assertTrue(turn4.replyText.contains("با موفقیت تنظیم شد"))
+        assertEquals(SlotFillingStatus.IDLE, turn4.newState.slotStatus)
+        assertTrue(turn4.replyText.contains("سرویس ثبت یادآور"))
+        assertFalse(turn4.replyText.contains("با موفقیت تنظیم شد"))
     }
 
     /**
