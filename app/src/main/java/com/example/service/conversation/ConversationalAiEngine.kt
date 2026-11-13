@@ -1465,13 +1465,38 @@ class ConversationalAiEngine(
         val hasGeneralScheduleVerb = (clean.contains("تنظیم کن") || clean.contains("ثبت کن") || clean.contains("ست کن")) &&
                 (clean.contains("ساعت") || clean.contains("فردا") || clean.contains("یادآور") || clean.contains("قرار") || clean.contains("جلسه") || clean.contains("آلارم") || clean.contains("برام") || clean.contains("وقت دکتر"))
 
+        // Natural-language task statements do not need the literal phrase "یادم بنداز".
+        // If a concrete task/activity is paired with an explicit date/time or recurrence,
+        // route it to reminder slot-filling rather than generic chat.
+        val hasTemporalCue = hasClockTime ||
+                listOf("امروز", "فردا", "پسفردا", "پس‌فردا", "هر روز", "روزانه",
+                    "هر هفته", "هفتگی", "هر ماه", "ماهانه", "هر سال", "سالانه",
+                    "یک ربع", "نیم ساعت", "دقیقه دیگه", "ساعت دیگه",
+                    "شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
+                    .any { clean.contains(it) } ||
+                Regex("""\\b\\d{1,2}[/-]\\d{1,2}""").containsMatchIn(clean)
+
+        val hasTaskLanguage = listOf(
+            "برم", "بروم", "بریم", "برود", "انجام بدم", "انجام دهم", "ورزش کنم",
+            "تماس بگیرم", "زنگ بزنم", "خرید کنم", "بخرم", "پرداخت کنم",
+            "تحویل بدم", "تحویل دهم", "ارسال کنم", "پیگیری کنم", "مراجعه کنم",
+            "بخوانم", "بخونم", "مطالعه کنم", "جلسه", "قرار", "دکتر",
+            "دارو", "قبض", "کار", "تمرین", "باشگاه", "امتحان"
+        ).any { clean.contains(it) }
+
+        val analyzedTitle = PersianCommandAnalyzer.analyze(input, referenceTimeMillis, timeZone).title
+        val isNaturalLanguageReminder = hasTemporalCue &&
+                !clean.endsWith("?") && !clean.endsWith("؟") &&
+                (hasTaskLanguage || analyzedTitle.trim().split(Regex("""\\s+""")).size >= 2) &&
+                !isGenericSubject(analyzedTitle)
+
         // Concise calendar entry shorthand: e.g. "سه‌شنبه ساعت ۱۹ تماس با همکار"
         val hasWeekday = clean.contains("شنبه") || clean.contains("یکشنبه") || clean.contains("دوشنبه") ||
                 clean.contains("سه‌شنبه") || clean.contains("چهارشنبه") || clean.contains("پنجشنبه") || clean.contains("جمعه")
         val hasClockTime = clean.contains("ساعت") && Regex("""ساعت\s*[\d۰-۹]{1,2}""").containsMatchIn(clean)
         val isConciseCalendarEntry = hasWeekday && hasClockTime && !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry) {
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry || isNaturalLanguageReminder) {
             return true
         }
 
