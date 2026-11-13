@@ -524,35 +524,36 @@ class ConversationalAiEngine(
 
         val clean = input.replace("نه،", "").replace("نه", "").replace("منظورم", "").trim()
         val reAnalyzed = PersianCommandAnalyzer.analyze(clean, referenceTimeMillis, timeZone)
-
-        val updatedTask = if (reAnalyzed.targetTimestamp != null) {
-            val j = PersianDateEngine.timestampToJalali(reAnalyzed.targetTimestamp, timeZone)
+        val isAmbiguous = reAnalyzed.validationStatus == ValidationStatus.AMBIGUOUS
+        val updatedTask = if (reAnalyzed.hasExplicitDate || reAnalyzed.hasExplicitTime) {
+            val merged = Calendar.getInstance(timeZone).apply { timeInMillis = draft.triggerTimestamp }
+            if (reAnalyzed.hasExplicitDate) {
+                val dateTs = reAnalyzed.targetTimestamp ?: placeholderTimestampForDate(reAnalyzed.jalaliDateText, referenceTimeMillis, timeZone)
+                val dateCal = Calendar.getInstance(timeZone).apply { timeInMillis = dateTs }
+                merged.set(Calendar.YEAR, dateCal.get(Calendar.YEAR))
+                merged.set(Calendar.MONTH, dateCal.get(Calendar.MONTH))
+                merged.set(Calendar.DAY_OF_MONTH, dateCal.get(Calendar.DAY_OF_MONTH))
+            }
+            if (reAnalyzed.hasExplicitTime) {
+                merged.set(Calendar.HOUR_OF_DAY, reAnalyzed.hour ?: merged.get(Calendar.HOUR_OF_DAY))
+                merged.set(Calendar.MINUTE, reAnalyzed.minute ?: 0)
+                merged.set(Calendar.SECOND, 0)
+                merged.set(Calendar.MILLISECOND, 0)
+            }
+            val ts = merged.timeInMillis
+            val j = PersianDateEngine.timestampToJalali(ts, timeZone)
             draft.copy(
-                triggerTimestamp = reAnalyzed.targetTimestamp,
-                jalaliDateText = reAnalyzed.jalaliDateText ?: j.formatPersianNumeric(),
+                triggerTimestamp = ts,
+                jalaliDateText = j.formatPersianNumeric(),
                 timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
-                hasExplicitDate = true,
-                hasExplicitTime = true
+                hasExplicitDate = draft.hasExplicitDate || reAnalyzed.hasExplicitDate,
+                hasExplicitTime = if (isAmbiguous) false else (draft.hasExplicitTime || reAnalyzed.hasExplicitTime),
+                isAmbiguous = isAmbiguous,
+                clarificationQuestion = reAnalyzed.clarificationQuestion
             )
         } else draft
 
-        val msg = "متوجه شدم. یادآور «${updatedTask.title}» برای ${updatedTask.jalaliDateText} ساعت ${updatedTask.timeText} اصلاح شد. ثبت بشه؟"
-        return ConversationalResponse(
-            replyText = msg,
-            newState = state.copy(
-                draftTask = updatedTask,
-                awaitingField = AwaitingField.EXECUTION_CONFIRMATION,
-                slotStatus = SlotFillingStatus.AWAITING_CONFIRMATION,
-                lastAssistantQuestion = msg
-            ),
-            actionCard = ConversationActionCard(
-                type = ActionCardType.PREVIEW_NEW_REMINDER,
-                task = updatedTask,
-                primaryActionLabel = "آره، ثبت کن",
-                secondaryActionLabel = "لغو"
-            ),
-            suggestedReplies = listOf("آره", "نه، لغوش کن")
-        )
+        return proceedToConfirmationOrCompletion(updatedTask, state)
     }
 
     /**
