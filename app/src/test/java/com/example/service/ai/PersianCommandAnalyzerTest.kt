@@ -322,4 +322,33 @@ class PersianCommandAnalyzerTest {
         assertTrue(result.title.contains("خرید نان"))
         assertFalse(result.title.contains("3 روز"))
     }
+
+    @Test
+    fun dateOnlyRequiresTimeAndDoesNotInventTimestamp() {
+        val result = PersianCommandAnalyzer.analyze("فردا یادم بنداز برم بانک", baseTime, tehranTimeZone)
+        assertTrue(result.hasExplicitDate)
+        assertFalse(result.hasExplicitTime)
+        assertNull(result.targetTimestamp)
+        assertNotNull(result.jalaliDateText)
+        assertTrue(result.needsUserClarification)
+    }
+
+    @Test
+    fun timeOnlyRequiresDateAndDoesNotAssumeTomorrow() {
+        val result = PersianCommandAnalyzer.analyze("ساعت ۱۰ صبح یادم بنداز برم بانک", baseTime, tehranTimeZone)
+        assertFalse(result.hasExplicitDate)
+        assertTrue(result.hasExplicitTime)
+        assertNull(result.targetTimestamp)
+        assertNull(result.jalaliDateText)
+        assertTrue(result.needsUserClarification)
+    }
+
+    @Test
+    fun missingBothDateAndTimeRequiresClarification() {
+        val result = PersianCommandAnalyzer.analyze("یادم بنداز برم بانک", baseTime, tehranTimeZone)
+        assertFalse(result.hasExplicitDate)
+        assertFalse(result.hasExplicitTime)
+        assertTrue(result.needsUserClarification)
+        assertNotNull(result.clarificationQuestion)
+    }
 }
