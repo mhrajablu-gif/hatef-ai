@@ -601,5 +601,31 @@ class ConversationalAiEngineTest {
         )
         assertTrue("نباید ادعای لغو آلارم کند: ${turn.replyText}", turn.replyText.contains("آلارم لغو نشد"))
     }
+
+    @Test
+    fun test13_TimeOnlyRequestMustAskForDateBeforeConfirmation() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "ساعت ۱۰ صبح یادم بنداز برم بانک",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.TIME_OR_DATE, turn.newState.awaitingField)
+        assertFalse(turn.newState.draftTask?.hasExplicitDate ?: true)
+        assertTrue(turn.newState.draftTask?.hasExplicitTime ?: false)
+        assertNull(turn.actionCard)
+    }
+
+    @Test
+    fun test14_DateOnlyRequestMustAskForTimeBeforeConfirmation() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "فردا یادم بنداز برم بانک",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.TIME_OR_DATE, turn.newState.awaitingField)
+        assertTrue(turn.newState.draftTask?.hasExplicitDate ?: false)
+        assertFalse(turn.newState.draftTask?.hasExplicitTime ?: true)
+        assertNull(turn.actionCard)
+    }
 }
 
