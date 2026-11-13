@@ -605,7 +605,7 @@ class ConversationalAiEngine(
             } else if (targetId != null) {
                 val minsDesc = if (offsetMinutes < 0) "${-offsetMinutes} دقیقه جلو کشیده شد" else "$offsetMinutes دقیقه به تعویق افتاد"
                 return ConversationalResponse(
-                    replyText = "قرار مورد نظر با موفقیت $minsDesc.",
+                    replyText = "سرویس یادآورها در دسترس نیست؛ تغییر زمان انجام نشد.",
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_REMINDER,
                         awaitingField = AwaitingField.NONE,
@@ -816,7 +816,7 @@ class ConversationalAiEngine(
                     val target = activeList.first()
                     val delRes = toolRegistry.deleteOrCancelReminder(target.id, isHardDelete = true)
                     return ConversationalResponse(
-                        replyText = "قرار «${target.title}» (${target.jalaliDateText} ساعت ${target.timeText}) با موفقیت حذف شد.",
+                        replyText = delRes.message,
                         newState = state.copy(
                             activeIntent = ConversationIntent.DELETE_REMINDER,
                             awaitingField = AwaitingField.NONE
@@ -953,7 +953,7 @@ class ConversationalAiEngine(
                 if (first != null) {
                     val res = toolRegistry.deleteOrCancelReminder(first.id, isHardDelete = true)
                     return ConversationalResponse(
-                        replyText = "اولین یادآور («${first.title}» - ${first.jalaliDateText} ساعت ${first.timeText}) با موفقیت حذف شد.",
+                        replyText = res.message,
                         newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
                         executedResult = res,
                         suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
@@ -971,7 +971,7 @@ class ConversationalAiEngine(
                 if (last != null) {
                     val res = toolRegistry.deleteOrCancelReminder(last.id, isHardDelete = true)
                     return ConversationalResponse(
-                        replyText = "آخرین یادآور («${last.title}» - ${last.jalaliDateText} ساعت ${last.timeText}) با موفقیت حذف شد.",
+                        replyText = res.message,
                         newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
                         executedResult = res,
                         suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
@@ -1313,7 +1313,7 @@ class ConversationalAiEngine(
             if (lower.contains("غیرفعال") || lower.contains("بردار") || lower.contains("خاموش") || lower.contains("صفر") || lower.contains("حذف")) {
                 val toolRes = toolRegistry?.updateDefaultAdvanceAlert(0)
                 return ConversationalResponse(
-                    replyText = toolRes?.message ?: "پیش‌اعلان پیش‌فرض غیرفعال شد.",
+                    replyText = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ تغییری اعمال نشد.",
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_APP_SETTINGS,
                         awaitingField = AwaitingField.NONE,
@@ -1325,7 +1325,7 @@ class ConversationalAiEngine(
             }
             val mins = extractMinuteOffset(lower) ?: extractNumber(lower) ?: 15
             val toolRes = toolRegistry?.updateDefaultAdvanceAlert(mins)
-            val msg = toolRes?.message ?: "تنظیمات برنامه با موفقیت تغییر کرد؛ از این به بعد تمام یادآوری‌های جدید $mins دقیقه زودتر نیز به شما اطلاع داده خواهند شد."
+            val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ تغییری اعمال نشد."
             return ConversationalResponse(
                 replyText = msg,
                 newState = state.copy(
