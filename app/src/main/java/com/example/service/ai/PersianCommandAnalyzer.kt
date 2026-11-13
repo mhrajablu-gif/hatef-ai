@@ -470,7 +470,7 @@ object PersianCommandAnalyzer {
 
         // Matches expressions like:
         // ساعت 6:30 عصر / ساعت 6 عصر / ساعت 6 و نیم عصر / ساعت 18:30 / 6 صبح / 7 عصر / ساعت 6
-        val clockRegex = Regex("""(?:ساعت\s*)?(\d{1,2})(?:[:：∶﹕٫](\d{1,2}))?(?:\s*و\s*(نیم|ربع|15|30))?\s*(صبح|بامداد|ظهر|عصر|غروب|شب|بعدازظهر)?(?!\s*روز)""")
+        val clockRegex = Regex("""(?:ساعت\s*)?(\d{1,2})(?:[:：∶﹕٫](\d{1,2})(?:\s*دقیقه)?)?(?:\s*و\s*(نیم|ربع|15|30))?\s*(صبح|بامداد|ظهر|عصر|غروب|شب|بعدازظهر)?(?!\s*روز)""")
         val match = clockRegex.find(clean)
 
         if (match != null && match.groupValues[1].isNotBlank()) {
