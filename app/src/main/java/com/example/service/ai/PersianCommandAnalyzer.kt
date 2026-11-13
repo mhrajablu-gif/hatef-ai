@@ -140,7 +140,7 @@ object PersianCommandAnalyzer {
                 cal.add(Calendar.DAY_OF_YEAR, dateExtraction.dayOffset)
                 targetTimestamp = cal.timeInMillis
                 reasoning.append("فاصله روز: ${dateExtraction.dayOffset} روز (${dateExtraction.matchedPhrase}). ")
-
+            }
 
             if (targetTimestamp != null) {
                 calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)
