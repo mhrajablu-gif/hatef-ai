@@ -24,6 +24,10 @@ object AlarmScheduler {
 
     fun scheduleReminder(context: Context, reminder: ReminderEntity) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+
+        // Clear both previously scheduled intents first. This prevents an old advance alert
+        // from firing after the reminder time or advance-alert setting has changed.
+        cancelReminder(context, reminder.id)
         val now = System.currentTimeMillis()
 
         // Schedule primary alarm
