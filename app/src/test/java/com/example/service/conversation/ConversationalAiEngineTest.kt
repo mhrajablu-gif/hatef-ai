@@ -47,7 +47,7 @@ class ConversationalAiEngineTest {
      * دستیار: باید بپرسد چه کاری و چه ساعتی.
      */
     @Test
-    fun test01_IncompleteRequestAndGradualSlotFilling() = runBlocking {
+    fun test01_IncompleteRequestAndNoFalseSuccessWithoutRegistry() = runBlocking {
         var state = ConversationState()
 
         // Turn 1: Incomplete request
