@@ -107,7 +107,8 @@ data class ConversationState(
     val lastMentionedReminderId: Long? = null,
     val turnsCount: Int = 0,
     // +1 delays the selected reminder; -1 moves it earlier while awaiting a duration.
-    val pendingRescheduleDirection: Int? = null
+    val pendingRescheduleDirection: Int? = null,
+    val pendingRescheduleOffsetMinutes: Int? = null
 ) {
     fun isWaitingForAnswer(): Boolean = awaitingField != AwaitingField.NONE
 }
