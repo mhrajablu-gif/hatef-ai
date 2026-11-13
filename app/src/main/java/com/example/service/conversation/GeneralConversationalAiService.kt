@@ -136,7 +136,7 @@ class GeneralConversationalAiService {
         // Keep only complete, correctly ordered user/model pairs. In particular, never
         // invent a model reply to carry the system prompt as conversation history.
         val historyContentList = mutableListOf<com.google.firebase.ai.type.Content>()
-        val cleanPrior = priorHistory.takeLast(8).toMutableList()
+        val cleanPrior = priorHistory.takeLast(20).toMutableList()
         while (cleanPrior.isNotEmpty() && cleanPrior.first().sender != MessageSender.USER) {
             cleanPrior.removeAt(0)
         }
