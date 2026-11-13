@@ -346,19 +346,18 @@ class ConversationalAiEngine(
     private fun placeholderTimestampForDate(
         jalaliDateText: String?,
         referenceTimeMillis: Long,
-        timeZone: TimeZone
+        timeZone: TimeZone,
+        hour: Int? = null,
+        minute: Int? = null
     ): Long {
-        val current = Calendar.getInstance(timeZone).apply { timeInMillis = referenceTimeMillis }
+        val current = PersianDateEngine.timestampToJalali(referenceTimeMillis, timeZone)
         val parts = jalaliDateText?.let { PersianDateEngine.toEnglishDigits(it).split("/") }
-        if (parts != null && parts.size == 3) {
-            val year = parts[0].toIntOrNull()
-            val month = parts[1].toIntOrNull()
-            val day = parts[2].toIntOrNull()
-            if (year != null && month != null && day != null) {
-                return PersianDateEngine.jalaliToTimestamp(year, month, day, current.get(Calendar.HOUR_OF_DAY), current.get(Calendar.MINUTE), timeZone)
-            }
-        }
-        return referenceTimeMillis
+        val year = parts?.getOrNull(0)?.toIntOrNull() ?: current.year
+        val month = parts?.getOrNull(1)?.toIntOrNull() ?: current.month
+        val day = parts?.getOrNull(2)?.toIntOrNull() ?: current.day
+        return PersianDateEngine.jalaliToTimestamp(
+            year, month, day, hour ?: current.hour, minute ?: current.minute, timeZone
+        )
     }
 
     /**
@@ -1244,19 +1243,23 @@ class ConversationalAiEngine(
         val hasHour = analysis.hour != null
         val hasTimestamp = analysis.targetTimestamp != null
 
-        // Case A: Missing both subject and specific hour (e.g. "فردا یه کاری دارم، یادم بنداز" or "یادم بنداز")
+        // Case A: Missing subject and clock time. Preserve an explicit date if one was supplied.
         if (isGeneric && !hasHour) {
-            val q = "حتماً. چه کاری رو باید یادتون بندازم و چه ساعتی؟"
-            val initialTs = if (hasTimestamp) analysis.targetTimestamp!! else referenceTimeMillis + 3600_000L
+            val initialTs = analysis.targetTimestamp ?: placeholderTimestampForDate(
+                analysis.jalaliDateText.takeIf { analysis.hasExplicitDate }, referenceTimeMillis, timeZone
+            )
             val j = PersianDateEngine.timestampToJalali(initialTs, timeZone)
+            val startDateText = analysis.jalaliDateText ?: j.formatPersianNumeric()
+            val timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute)
+            val q = "حتماً. برای چه کاری یادآوری تنظیم کنم؟"
             val tentative = ParsedTask(
                 title = "یادآوری",
                 triggerTimestamp = initialTs,
-                jalaliDateText = analysis.jalaliDateText ?: j.formatPersianNumeric(),
-                timeText = "۱۰:۰۰",
+                jalaliDateText = startDateText,
+                timeText = timeText,
                 hasExplicitTitle = false,
-                hasExplicitTime = false,
-                hasExplicitDate = hasTimestamp
+                hasExplicitTime = analysis.hasExplicitTime,
+                hasExplicitDate = analysis.hasExplicitDate
             )
             return ConversationalResponse(
                 replyText = q,
@@ -1271,9 +1274,12 @@ class ConversationalAiEngine(
             )
         }
 
-        // Case B: Time specified, but task subject missing (e.g., "فردا ساعت ده یادم بنداز")
+        // Case B: Time specified, but task subject missing. Date remains unresolved unless explicit.
         if (isGeneric && hasHour) {
-            val effTs = analysis.targetTimestamp ?: (referenceTimeMillis + 86400000L)
+            val effTs = analysis.targetTimestamp ?: placeholderTimestampForDate(
+                analysis.jalaliDateText.takeIf { analysis.hasExplicitDate }, referenceTimeMillis, timeZone,
+                analysis.hour, analysis.minute
+            )
             val j = PersianDateEngine.timestampToJalali(effTs, timeZone)
             val dateStr = analysis.jalaliDateText ?: j.formatPersianNumeric()
             val effHour = analysis.hour ?: j.hour
@@ -1286,8 +1292,10 @@ class ConversationalAiEngine(
                 jalaliDateText = dateStr,
                 timeText = timeStr,
                 hasExplicitTitle = false,
-                hasExplicitTime = true,
-                hasExplicitDate = true
+                hasExplicitTime = analysis.hasExplicitTime && analysis.validationStatus != ValidationStatus.AMBIGUOUS,
+                hasExplicitDate = analysis.hasExplicitDate,
+                isAmbiguous = analysis.validationStatus == ValidationStatus.AMBIGUOUS,
+                clarificationQuestion = analysis.clarificationQuestion
             )
             return ConversationalResponse(
                 replyText = q,
@@ -1302,17 +1310,24 @@ class ConversationalAiEngine(
             )
         }
 
-        // Case C: Task subject specified, but hour or time missing (e.g. "یادم بنداز برم بانک")
+        // Case C: Task subject specified, but clock time is missing.
         if (!isGeneric && !hasHour) {
-            val q = "حتماً، برای «${analysis.title}» چه روز و ساعتی یادآوری کنم؟"
+            val initialTs = analysis.targetTimestamp ?: placeholderTimestampForDate(
+                analysis.jalaliDateText.takeIf { analysis.hasExplicitDate }, referenceTimeMillis, timeZone
+            )
+            val j = PersianDateEngine.timestampToJalali(initialTs, timeZone)
+            val q = when {
+                !analysis.hasExplicitDate -> "برای «${analysis.title}» چه روز و ساعتی یادآوری کنم؟"
+                else -> "تاریخ مشخص است؛ یادآوری «${analysis.title}» را چه ساعتی تنظیم کنم؟"
+            }
             val tentative = ParsedTask(
                 title = analysis.title,
-                triggerTimestamp = referenceTimeMillis + 3600_000L,
-                jalaliDateText = PersianDateEngine.timestampToJalali(referenceTimeMillis + 3600_000L, timeZone).formatPersianNumeric(),
-                timeText = "۱۰:۰۰",
+                triggerTimestamp = initialTs,
+                jalaliDateText = analysis.jalaliDateText ?: j.formatPersianNumeric(),
+                timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
                 hasExplicitTitle = true,
-                hasExplicitTime = false,
-                hasExplicitDate = false
+                hasExplicitTime = analysis.hasExplicitTime,
+                hasExplicitDate = analysis.hasExplicitDate
             )
             return ConversationalResponse(
                 replyText = q,
@@ -1323,28 +1338,34 @@ class ConversationalAiEngine(
                     draftTask = tentative,
                     lastAssistantQuestion = q
                 ),
-                suggestedReplies = listOf("فردا ساعت ۱۰ صبح", "امروز ساعت ۶ عصر", "نیم ساعت دیگه")
+                suggestedReplies = if (analysis.hasExplicitDate) listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگه")
+                    else listOf("فردا ساعت ۱۰ صبح", "امروز ساعت ۶ عصر", "نیم ساعت دیگه")
             )
         }
 
-        // Case D: Both subject and time specified, but hour is ambiguous (e.g. "فردا ساعت ۶ برم آزمایشگاه")
-        val effectiveTs = analysis.targetTimestamp ?: (referenceTimeMillis + 3600_000L)
+        // Case D: Task and clock time specified; date may still be missing or the hour may be ambiguous.
+        val effectiveTs = analysis.targetTimestamp ?: placeholderTimestampForDate(
+            analysis.jalaliDateText.takeIf { analysis.hasExplicitDate }, referenceTimeMillis, timeZone,
+            analysis.hour, analysis.minute
+        )
         val j = PersianDateEngine.timestampToJalali(effectiveTs, timeZone)
         val isAmbiguous = analysis.validationStatus == ValidationStatus.AMBIGUOUS
         val tentative = ParsedTask(
             title = analysis.title,
             triggerTimestamp = effectiveTs,
             jalaliDateText = analysis.jalaliDateText ?: j.formatPersianNumeric(),
-            timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+            timeText = if (analysis.hasExplicitTime && analysis.hour != null)
+                PersianDateEngine.formatPersianTime(analysis.hour, analysis.minute ?: 0)
+            else PersianDateEngine.formatPersianTime(j.hour, j.minute),
             isAmbiguous = isAmbiguous,
             clarificationQuestion = analysis.clarificationQuestion,
             hasExplicitTitle = true,
-            hasExplicitTime = analysis.targetTimestamp != null,
-            hasExplicitDate = analysis.targetTimestamp != null
+            hasExplicitTime = analysis.hasExplicitTime && !isAmbiguous,
+            hasExplicitDate = analysis.hasExplicitDate
         )
 
         if (isAmbiguous) {
-            val q = analysis.clarificationQuestion ?: "منظورتان ساعت ${j.hour} صبح است یا عصر؟"
+            val q = analysis.clarificationQuestion ?: "منظورتان ساعت ${tentative.timeText.substringBefore(":")} صبح است یا عصر؟"
             return ConversationalResponse(
                 replyText = q,
                 newState = state.copy(
@@ -1354,9 +1375,11 @@ class ConversationalAiEngine(
                     draftTask = tentative,
                     lastAssistantQuestion = q
                 ),
-                suggestedReplies = listOf("صبح (۰${j.hour}:۰۰)", "عصر (${j.hour + 12}:۰۰)")
+                suggestedReplies = listOf("صبح", "عصر")
             )
         }
+
+        return proceedToConfirmationOrCompletion(tentative, state)
 
         // Case E: Ready to execute / confirm
         return proceedToConfirmationOrCompletion(tentative, state)
