@@ -547,48 +547,59 @@ class ConversationalAiEngineTest {
     }
 
 
-    /** عدم دسترسی به ابزارها نباید حذف گروهی یا جابه‌جایی را موفق جلوه دهد. */
     @Test
-    fun test23_NoFalseSuccessWhenReminderToolsAreUnavailable() = runBlocking {
-        val deleteAll = engine.processTurn(
+    fun test23_BulkDeleteWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
             userInput = "همه یادآورهام رو حذف کن",
             currentState = ConversationState(),
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertFalse("حذف گروهی بدون ابزار نباید موفق باشد", deleteAll.executedResult?.success ?: true)
-        assertTrue(deleteAll.replyText.contains("سرویس یادآورها"))
-        assertFalse(deleteAll.replyText.contains("حذف شدند"))
+        assertFalse("حذف گروهی بدون ابزار نباید موفق باشد", turn.executedResult?.success ?: true)
+        assertTrue("باید نبود سرویس را اعلام کند: ${turn.replyText}", turn.replyText.contains("سرویس یادآورها"))
+        assertFalse("نباید پیام حذف موفق بدهد: ${turn.replyText}", turn.replyText.contains("حذف شدند"))
+    }
 
-        val reschedule = engine.processTurn(
+    @Test
+    fun test24_RescheduleWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
             userInput = "نیم ساعت جلو بنداز",
             currentState = ConversationState(lastMentionedReminderId = 99L),
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertEquals(SlotFillingStatus.IDLE, reschedule.newState.slotStatus)
-        assertTrue(reschedule.replyText.contains("تغییر زمان انجام نشد"))
-        assertFalse(reschedule.replyText.contains("جلو کشیده شد"))
+        assertEquals(SlotFillingStatus.IDLE, turn.newState.slotStatus)
+        assertTrue("باید عدم انجام تغییر را اعلام کند: ${turn.replyText}", turn.replyText.contains("تغییر زمان انجام نشد"))
+        assertFalse(turn.replyText.contains("جلو کشیده شد"))
+    }
 
-        val changeHour = engine.processTurn(
+    @Test
+    fun test25_ChangeHourWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
             userInput = "ساعت قرار رو بکن ۱۰",
             currentState = ConversationState(lastMentionedReminderId = 99L),
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertTrue(changeHour.replyText.contains("سرویس یادآورها در دسترس نیست"))
-        assertFalse(changeHour.replyText.contains("تغییر یافت"))
+        assertTrue("باید نبود سرویس را اعلام کند: ${turn.replyText}", turn.replyText.contains("سرویس یادآورها در دسترس نیست"))
+        assertFalse(turn.replyText.contains("تغییر یافت"))
+    }
 
-        val advanceAlert = engine.processTurn(
+    @Test
+    fun test26_AdvanceAlertWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
             userInput = "برای همین قرار نیم ساعت قبل هم اعلان بذار",
             currentState = ConversationState(lastMentionedReminderId = 99L),
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertTrue(advanceAlert.replyText.contains("پیش‌اعلان تنظیم نشد"))
+        assertTrue("نباید ادعای تنظیم پیش‌اعلان کند: ${turn.replyText}", turn.replyText.contains("پیش‌اعلان تنظیم نشد"))
+    }
 
-        val cancelAlarm = engine.processTurn(
+    @Test
+    fun test27_CancelAlarmWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
             userInput = "یادآور رو لغو کن ولی قرار رو نگه دار",
             currentState = ConversationState(lastMentionedReminderId = 99L),
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertTrue(cancelAlarm.replyText.contains("آلارم لغو نشد"))
+        assertTrue("نباید ادعای لغو آلارم کند: ${turn.replyText}", turn.replyText.contains("آلارم لغو نشد"))
     }
 }
 
