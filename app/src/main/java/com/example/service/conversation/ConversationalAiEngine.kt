@@ -1345,7 +1345,7 @@ class ConversationalAiEngine(
             if (isDark || isLight) {
                 val mode = if (isDark) "تاریک" else "روشن"
                 val toolRes = toolRegistry?.updateAppTheme(mode)
-                val msg = toolRes?.message ?: "پوسته برنامه به «${if (isDark) "تاریک" else "روشن"}» تغییر یافت."
+                val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ پوسته تغییر نکرد."
                 return ConversationalResponse(
                     replyText = msg,
                     newState = state.copy(
@@ -1377,7 +1377,7 @@ class ConversationalAiEngine(
             val key = if (isSleep) "ساعت_خواب" else "ساعت_بیداری"
             val toolRes = toolRegistry?.saveUserMemoryPreference(key, formattedTime, if (isSleep) "ساعت معمول خواب" else "ساعت معمول بیداری")
             val label = if (isSleep) "خوابیدن" else "بیداری"
-            val reply = "ساعت $label شما ($formattedTime) در حافظه دستیار ثبت شد. از این پس در زمان‌بندی‌ها، پیشنهاد ساعات ورزش و قرارهای روزانه‌تان به این موضوع توجه خواهم کرد."
+            val reply = toolRes?.message ?: "سرویس ذخیره‌سازی ترجیحات در دسترس نیست؛ ساعت $label ثبت نشد."
             return ConversationalResponse(
                 replyText = reply,
                 newState = state.copy(
