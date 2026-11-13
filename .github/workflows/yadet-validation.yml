@@ -1,0 +1,87 @@
+name: Yadet validation (tests + debug APK)
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Unit tests and debug APK
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Restore or generate debug keystore
+        shell: bash
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+            echo "Restored debug.keystore from repository backup."
+          else
+            keytool -genkeypair -alias androiddebugkey -keypass android -keystore debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -keyalg RSA -keysize 2048 -validity 10000
+            echo "Generated temporary debug.keystore for CI."
+          fi
+          test -s debug.keystore
+
+      - name: Prepare Gradle
+        run: chmod +x ./gradlew
+
+      - name: Restore Firebase configuration from repository secret
+        shell: bash
+        env:
+          FIREBASE_GOOGLE_SERVICES_JSON: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$FIREBASE_GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON" > app/google-services.json
+            echo "Restored Firebase configuration from GitHub Actions secret."
+          elif [ -f "app/google-services.json" ]; then
+            echo "Firebase configuration file is present."
+          else
+            echo "::warning::Firebase configuration is missing. Add the multiline JSON file as the FIREBASE_GOOGLE_SERVICES_JSON repository secret. The APK may compile, but Firebase AI Logic cannot be assumed to initialize."
+          fi
+
+      - name: Run unit tests and build debug APK (retry transient Gradle download failures)
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            echo "Validation attempt ${attempt}/3"
+            if ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Validation failed; waiting 20 seconds before retry."
+              sleep 20
+            fi
+          done
+          echo "Validation failed after 3 attempts."
+          exit 1
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: Yadet-validation-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Yadet-unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14

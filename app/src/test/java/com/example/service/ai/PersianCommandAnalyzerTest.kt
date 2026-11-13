@@ -285,4 +285,41 @@ class PersianCommandAnalyzerTest {
         assertEquals(19, result3.hour)
         assertEquals(30, result3.minute)
     }
+
+    @Test
+    fun testCase15_SpokenPersianRelativeDaysAndCleanTitle() {
+        val input = "برای سه روز دیگه نون بخرم ساعت ۱۰"
+        val result = PersianCommandAnalyzer.analyze(input, baseTime, tehranTimeZone)
+
+        val expected = Calendar.getInstance(tehranTimeZone).apply {
+            timeInMillis = baseTime
+            add(Calendar.DAY_OF_YEAR, 3)
+            set(Calendar.HOUR_OF_DAY, 10)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        assertEquals("عبارت سه روز دیگه باید دقیقاً سه روز جلو برود", expected, result.targetTimestamp)
+        assertTrue("عنوان باید کار اصلی را نگه دارد", result.title.contains("نون"))
+        assertFalse("عبارت تاریخ نباید در عنوان باقی بماند", result.title.contains("سه روز"))
+        assertTrue("ساعت ۱۰ بدون صبح/عصر باید ابهام داشته باشد", result.ambiguousFields.contains("HOUR_PERIOD_AM_PM"))
+    }
+
+    @Test
+    fun testCase16_NumericRelativeDaysStillWork() {
+        val result = PersianCommandAnalyzer.analyze("3 روز دیگه ساعت ۱۸ خرید نان", baseTime, tehranTimeZone)
+        val expected = Calendar.getInstance(tehranTimeZone).apply {
+            timeInMillis = baseTime
+            add(Calendar.DAY_OF_YEAR, 3)
+            set(Calendar.HOUR_OF_DAY, 18)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        assertEquals(expected, result.targetTimestamp)
+        assertTrue(result.title.contains("خرید نان"))
+        assertFalse(result.title.contains("3 روز"))
+    }
 }
