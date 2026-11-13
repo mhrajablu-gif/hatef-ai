@@ -36,7 +36,8 @@ class ReminderReceiver : BroadcastReceiver() {
                 val desc = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_DESC) ?: ""
                 val time = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_TIME) ?: ""
                 val soundUriStr = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_SOUND_URI)
-                showNotification(context, reminderId, title, desc, time, soundUriStr)
+                val isAdvance = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_ADVANCE, false)
+                showNotification(context, reminderId, title, desc, time, soundUriStr, isAdvance)
             }
 
             AlarmScheduler.ACTION_COMPLETE_REMINDER -> {
@@ -90,7 +91,8 @@ class ReminderReceiver : BroadcastReceiver() {
         title: String,
         description: String,
         time: String,
-        soundUriStr: String?
+        soundUriStr: String?,
+        isAdvance: Boolean
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -142,11 +144,6 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Try direct launch for instant full-screen wake-up
-        try {
-            context.startActivity(fullScreenIntent)
-        } catch (_: Exception) {}
-
         // Tap to open app
         val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -184,6 +181,9 @@ class ReminderReceiver : BroadcastReceiver() {
         )
 
         val fullBody = if (time.isNotBlank()) "⏰ ساعت $time | $description" else description
+        // Keep the advance warning separate from the actual due-time notification.
+        // It must not expose actions that complete or snooze the underlying reminder.
+        val notificationId = if (isAdvance) (reminderId + 100000).toInt() else reminderId.toInt()
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -197,10 +197,14 @@ class ReminderReceiver : BroadcastReceiver() {
             .setSound(soundUri)
             .setVibrate(longArrayOf(0, 400, 200, 400))
             .setContentIntent(contentPendingIntent)
-            .setFullScreenIntent(fullScreenPendingIntent, true)
-            .addAction(0, "✅ انجام شد", donePendingIntent)
-            .addAction(0, "⏱ ۱۵ دقیقه بعد", snoozePendingIntent)
 
-        notificationManager.notify(reminderId.toInt(), builder.build())
+        if (!isAdvance) {
+            builder
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .addAction(0, "✅ انجام شد", donePendingIntent)
+                .addAction(0, "⏱ ۱۵ دقیقه بعد", snoozePendingIntent)
+        }
+
+        notificationManager.notify(notificationId, builder.build())
     }
 }
