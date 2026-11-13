@@ -18,11 +18,10 @@ class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
     private fun createModel(userContextSummary: String?) =
-        return Firebase.ai.generativeModel(
+        Firebase.ai.generativeModel(
             modelName = "gemini-3.8-flash",
             systemInstruction = content { text(buildSystemPrompt(userContextSummary)) }
         )
-    }
 
     /**
      * Answers general inquiries, brainstorms ideas, explains concepts, offers logical advice,
