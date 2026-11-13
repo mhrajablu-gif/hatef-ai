@@ -556,7 +556,7 @@ class ConversationalAiEngine(
             }
             return ConversationalResponse(
                 replyText = if (toolRegistry == null) {
-                    "سرویس یادآورها در دسترس نیست؛ هیچ تغییری انجام نشد."
+                    "سرویس یادآورها در دسترس نیست؛ قرار فردا به مدت ${offsetMinutes} دقیقه عقب نرفت و هیچ تغییری انجام نشد."
                 } else {
                     "برای فردا یادآوری پیدا نکردم؛ چیزی تغییر نکرده است."
                 },
@@ -579,7 +579,7 @@ class ConversationalAiEngine(
                 )
             } else {
                 return ConversationalResponse(
-                    replyText = "نتوانستم یادآور مشخصی را برای انتقال پیدا کنم؛ لطفاً بگویید کدام قرار را تغییر بدهم.",
+                    replyText = if (toolRegistry == null && targetId != null) { "سرویس یادآورها در دسترس نیست؛ قرار مشخص‌شده به هفته بعد منتقل نشد و هیچ تغییری انجام نشد." } else { "نتوانستم یادآور مشخصی را برای انتقال پیدا کنم؛ لطفاً بگویید کدام قرار را تغییر بدهم." }, 
                     newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
                     suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
                 )
@@ -1325,7 +1325,7 @@ class ConversationalAiEngine(
             }
             val mins = extractMinuteOffset(lower) ?: extractNumber(lower) ?: 15
             val toolRes = toolRegistry?.updateDefaultAdvanceAlert(mins)
-            val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ تغییری اعمال نشد."
+            val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ پیش‌اعلان ${mins} دقیقه تنظیم نشد."
             return ConversationalResponse(
                 replyText = msg,
                 newState = state.copy(
@@ -1345,7 +1345,7 @@ class ConversationalAiEngine(
             if (isDark || isLight) {
                 val mode = if (isDark) "تاریک" else "روشن"
                 val toolRes = toolRegistry?.updateAppTheme(mode)
-                val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ پوسته تغییر نکرد."
+                val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ تم $mode تغییر نکرد."
                 return ConversationalResponse(
                     replyText = msg,
                     newState = state.copy(
@@ -1377,7 +1377,7 @@ class ConversationalAiEngine(
             val key = if (isSleep) "ساعت_خواب" else "ساعت_بیداری"
             val toolRes = toolRegistry?.saveUserMemoryPreference(key, formattedTime, if (isSleep) "ساعت معمول خواب" else "ساعت معمول بیداری")
             val label = if (isSleep) "خوابیدن" else "بیداری"
-            val reply = toolRes?.message ?: "سرویس ذخیره‌سازی ترجیحات در دسترس نیست؛ ساعت $label ثبت نشد."
+            val reply = toolRes?.message ?: "سرویس ذخیره‌سازی ترجیحات در دسترس نیست؛ ساعت $label در حافظه ثبت نشد."
             return ConversationalResponse(
                 replyText = reply,
                 newState = state.copy(
