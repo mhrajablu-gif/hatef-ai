@@ -1352,6 +1352,20 @@ class ConversationalAiEngine(
                 isAmbiguous = analysis.validationStatus == ValidationStatus.AMBIGUOUS,
                 clarificationQuestion = analysis.clarificationQuestion
             )
+            if (tentative.isAmbiguous || analysis.validationStatus == ValidationStatus.AMBIGUOUS) {
+                val ambiguityQuestion = analysis.clarificationQuestion ?: "منظورتان ساعت ${tentative.timeText.substringBefore(":")} صبح است یا عصر؟"
+                return ConversationalResponse(
+                    replyText = ambiguityQuestion,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.CREATE_REMINDER,
+                        slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                        awaitingField = AwaitingField.AMBIGUOUS_HOUR_AM_PM,
+                        draftTask = tentative,
+                        lastAssistantQuestion = ambiguityQuestion
+                    ),
+                    suggestedReplies = listOf("صبح", "عصر")
+                )
+            }
             return ConversationalResponse(
                 replyText = q,
                 newState = state.copy(
