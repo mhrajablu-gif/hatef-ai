@@ -441,6 +441,22 @@ class ConversationalAiEngine(
             )
         }
 
+        if (task.triggerTimestamp <= System.currentTimeMillis()) {
+            val q = "زمان انتخاب‌شده در گذشته است؛ لطفاً تاریخ و ساعت آینده را مشخص کنید."
+            val incomplete = task.copy(hasExplicitDate = false, hasExplicitTime = false, isAmbiguous = false)
+            return ConversationalResponse(
+                replyText = q,
+                newState = state.copy(
+                    activeIntent = ConversationIntent.CREATE_REMINDER,
+                    draftTask = incomplete,
+                    awaitingField = AwaitingField.TIME_OR_DATE,
+                    slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                    lastAssistantQuestion = q
+                ),
+                suggestedReplies = listOf("فردا ساعت ۹ صبح", "پس‌فردا ساعت ۱۰ صبح", "نیم ساعت دیگر")
+            )
+        }
+
         val confirmMsg = "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} تنظیم بشه؟"
         val card = ConversationActionCard(
             type = ActionCardType.PREVIEW_NEW_REMINDER,
@@ -1249,7 +1265,7 @@ class ConversationalAiEngine(
         val analysis = PersianCommandAnalyzer.analyze(input, referenceTimeMillis, timeZone)
 
         // Check if target is past
-        if (analysis.targetTimestamp != null && analysis.targetTimestamp < referenceTimeMillis) {
+        if (analysis.targetTimestamp != null && analysis.targetTimestamp < referenceTimeMillis && analysis.validationStatus != ValidationStatus.AMBIGUOUS) {
             return ConversationalResponse(
                 replyText = analysis.conflictMessage ?: "زمان مشخص‌شده در گذشته قرار دارد؛ لطفاً یک زمان در آینده بفرمایید.",
                 newState = state.copy(
