@@ -251,6 +251,9 @@ class GeminiSemanticParser {
 
     private fun parseSingleSegment(segment: String, referenceTimeMillis: Long): ParsedTask {
         val extracted = PersianDateEngine.extractPersianTask(segment, referenceTimeMillis)
+        val analysis = PersianCommandAnalyzer.analyze(segment, referenceTimeMillis)
+        val resolvedTimestamp = analysis.targetTimestamp ?: extracted.triggerTimestamp
+        val jalali = PersianDateEngine.timestampToJalali(resolvedTimestamp)
 
         val priority = when {
             segment.contains("فوری") || segment.contains("خیلی مهم") -> 2
@@ -284,13 +287,12 @@ class GeminiSemanticParser {
         val hasRelativeDateTime = extracted.rawTimePhrase.isRelativeDateTimePhrase()
         val hasExplicitTime = analysis.hasExplicitTime || hasRelativeDateTime
         val hasExplicitDate = analysis.hasExplicitDate || hasRelativeDateTime
-        val analysis = PersianCommandAnalyzer.analyze(segment, referenceTimeMillis)
         val hasAmbiguousTimePeriod = analysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
 
         val clarification = when {
             hasAmbiguousTimePeriod -> "منظورتان ساعت ${extracted.timeText.substringBefore(":")} صبح است یا شب؟"
             !hasExplicitTime || !hasExplicitDate -> "برای یادآوری «${extracted.title}»، ${if (!hasExplicitDate && !hasExplicitTime) "تاریخ و ساعت" else if (!hasExplicitDate) "تاریخ" else "ساعت"} مشخص نشده است؛ لطفاً آن را تعیین کنید."
-            !hasExplicitTitle -> "زمان یادآوری روی ${extracted.jalaliDateText} ساعت ${extracted.timeText} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
+            !hasExplicitTitle -> "زمان یادآوری روی ${jalali.formatPersianNumeric()} ساعت ${PersianDateEngine.formatPersianTime(jalali.hour, jalali.minute)} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
             else -> null
         }
 
@@ -298,9 +300,9 @@ class GeminiSemanticParser {
             title = extracted.title.capitalizeFirstLetter(),
             description = segment,
             rawTimePhrase = extracted.rawTimePhrase,
-            triggerTimestamp = extracted.triggerTimestamp,
-            jalaliDateText = extracted.jalaliDateText,
-            timeText = extracted.timeText,
+            triggerTimestamp = resolvedTimestamp,
+            jalaliDateText = analysis.jalaliDateText ?: jalali.formatPersianNumeric(),
+            timeText = PersianDateEngine.formatPersianTime(jalali.hour, jalali.minute),
             category = category,
             priority = priority,
             repeatType = repeat,
