@@ -1593,6 +1593,7 @@ class ConversationalAiEngine(
             timeText = if (analysis.hasExplicitTime && analysis.hour != null)
                 PersianDateEngine.formatPersianTime(analysis.hour, analysis.minute ?: 0)
             else PersianDateEngine.formatPersianTime(j.hour, j.minute),
+            repeatType = analysis.repeatType,
             isAmbiguous = isAmbiguous,
             clarificationQuestion = analysis.clarificationQuestion,
             hasExplicitTitle = true,
