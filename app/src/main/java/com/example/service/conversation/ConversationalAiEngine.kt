@@ -298,7 +298,7 @@ class ConversationalAiEngine(
                     val question = "کدام یادآور را تغییر بدهم؟"
                     return ConversationalResponse(
                         replyText = question,
-                        newState = state.copy(awaitingField = AwaitingField.NONE, pendingRescheduleDirection = null),
+                        newState = state.copy(awaitingField = AwaitingField.NONE, pendingRescheduleDirection = null, pendingRescheduleOffsetMinutes = null),
                         suggestedReplies = listOf("مشاهده یادآورها")
                     )
                 }
@@ -813,7 +813,6 @@ class ConversationalAiEngine(
                     suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
                 )
             } else if (targetId != null) {
-                val minsDesc = if (offsetMinutes < 0) "${-offsetMinutes} دقیقه جلو کشیده شد" else "$offsetMinutes دقیقه به تعویق افتاد"
                 return ConversationalResponse(
                     replyText = "سرویس یادآورها در دسترس نیست؛ تغییر زمان انجام نشد.",
                     newState = state.copy(
