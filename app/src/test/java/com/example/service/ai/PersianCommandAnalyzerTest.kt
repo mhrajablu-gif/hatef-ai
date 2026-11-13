@@ -365,6 +365,7 @@ class PersianCommandAnalyzerTest {
         assertEquals(ValidationStatus.VALID, result.validationStatus)
         assertTrue("عنوان باید فقط کار بانکی را نگه دارد", result.title.contains("بانک"))
         assertFalse("عدد ۳۵ نباید در عنوان باقی بماند", result.title.contains("35"))
+        assertFalse("واژه دقیقه نباید در عنوان باقی بماند", result.title.contains("دقیقه"))
         assertNotNull(result.targetTimestamp)
     }
 
