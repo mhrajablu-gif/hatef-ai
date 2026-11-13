@@ -428,20 +428,22 @@ class ConversationalAiEngine(
                 "متأسفانه در ثبت یادآور خطایی رخ داد: ${result.message}"
             },
             newState = state.copy(
-                slotStatus = if (result.success) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE,
-                awaitingField = AwaitingField.NONE,
-                draftTask = null,
-                targetReminderId = entity?.id,
-                lastMentionedReminderId = entity?.id,
-                lastAssistantQuestion = null
+                slotStatus = if (result.success) SlotFillingStatus.COMPLETED else SlotFillingStatus.AWAITING_CONFIRMATION,
+                awaitingField = if (result.success) AwaitingField.NONE else AwaitingField.EXECUTION_CONFIRMATION,
+                draftTask = if (result.success) null else task,
+                targetReminderId = if (result.success) entity?.id else state.targetReminderId,
+                lastMentionedReminderId = if (result.success) entity?.id else state.lastMentionedReminderId,
+                lastAssistantQuestion = if (result.success) null else "ثبت یادآور «${task.title}» را دوباره امتحان کنم؟"
             ),
             actionCard = ConversationActionCard(
-                type = ActionCardType.EXECUTION_RESULT,
+                type = if (result.success) ActionCardType.EXECUTION_RESULT else ActionCardType.PREVIEW_NEW_REMINDER,
                 task = task,
                 targetReminder = entity,
-                statusMessage = result.message
+                primaryActionLabel = if (result.success) "انجام شد" else "تلاش دوباره",
+                secondaryActionLabel = "لغو",
+                statusMessage = if (result.success) result.message else "ثبت انجام نشد؛ اطلاعات یادآور حفظ شده است. ${result.message}"
             ),
-            suggestedReplies = listOf("یادآور جدید", "یادآورهای امروز", "ممنون"),
+            suggestedReplies = if (result.success) listOf("یادآور جدید", "یادآورهای امروز", "ممنون") else listOf("آره، دوباره ثبت کن", "لغو", "تغییر زمان"),
             executedResult = result
         )
     }
@@ -593,7 +595,7 @@ class ConversationalAiEngine(
             if (targetId != null && toolRegistry != null) {
                 val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMinutes)
                 return ConversationalResponse(
-                    replyText = res.message,
+                    replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_REMINDER,
                         awaitingField = AwaitingField.NONE,
@@ -609,7 +611,7 @@ class ConversationalAiEngine(
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_REMINDER,
                         awaitingField = AwaitingField.NONE,
-                        slotStatus = SlotFillingStatus.COMPLETED
+                        slotStatus = SlotFillingStatus.IDLE
                     ),
                     suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
                 )
@@ -618,7 +620,7 @@ class ConversationalAiEngine(
                 if (latest != null) {
                     val res = toolRegistry.rescheduleReminder(latest.id, offsetMinutes = offsetMinutes)
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(
                             targetReminderId = latest.id,
                             lastMentionedReminderId = latest.id,
@@ -667,7 +669,11 @@ class ConversationalAiEngine(
                             newTimeText = newTime
                         )
                         return ConversationalResponse(
-                            replyText = "ساعت یادآور «${reminder.title}» به $newDate ساعت $newTime تغییر یافت.",
+                            replyText = if (res.success) {
+                                "ساعت یادآور «${reminder.title}» به $newDate ساعت $newTime تغییر یافت."
+                            } else {
+                                "تغییر ساعت انجام نشد: ${res.message}"
+                            },
                             newState = state.copy(
                                 activeIntent = ConversationIntent.UPDATE_REMINDER,
                                 targetReminderId = targetId,
@@ -701,7 +707,7 @@ class ConversationalAiEngine(
             if (targetId != null && toolRegistry != null) {
                 val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMinutes)
                 return ConversationalResponse(
-                    replyText = res.message,
+                    replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_REMINDER,
                         awaitingField = AwaitingField.NONE,
@@ -715,7 +721,7 @@ class ConversationalAiEngine(
                 if (latest != null) {
                     val res = toolRegistry.rescheduleReminder(latest.id, offsetMinutes = offsetMinutes)
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(
                             targetReminderId = latest.id,
                             lastMentionedReminderId = latest.id,
@@ -739,7 +745,7 @@ class ConversationalAiEngine(
                 if (toolRegistry != null) {
                     val res = toolRegistry.updateAdvanceAlert(targetId, advanceMins)
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(awaitingField = AwaitingField.NONE),
                         executedResult = res,
                         suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
@@ -761,7 +767,7 @@ class ConversationalAiEngine(
                 if (toolRegistry != null) {
                     val res = toolRegistry.deleteOrCancelReminder(targetId, isHardDelete = false)
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(awaitingField = AwaitingField.NONE),
                         executedResult = res,
                         suggestedReplies = listOf("مشاهده یادآورها")
@@ -782,7 +788,7 @@ class ConversationalAiEngine(
             if (targetId != null && toolRegistry != null) {
                 val res = toolRegistry.deleteOrCancelReminder(targetId, isHardDelete = true)
                 return ConversationalResponse(
-                    replyText = res.message,
+                    replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                     newState = state.copy(
                         activeIntent = ConversationIntent.DELETE_REMINDER,
                         targetReminderId = null,
@@ -894,17 +900,17 @@ class ConversationalAiEngine(
 
             if (isBulk) {
                 if (lower.contains("فقط آلارم") || lower.contains("ولی قرار") || (lower.contains("آلارم") && lower.contains("نگه دار"))) {
-                    val res = toolRegistry?.cancelAllAlarmsOnly() ?: ToolResult(success = true, message = "تمام آلارم‌ها غیرفعال شدند.")
+                    val res = toolRegistry?.cancelAllAlarmsOnly() ?: ToolResult(success = false, message = "سرویس یادآورها در دسترس نیست؛ هیچ آلارمی تغییر نکرد.", errorCode = "TOOL_REGISTRY_UNAVAILABLE")
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
                         executedResult = res,
                         suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
                     )
                 } else {
-                    val res = toolRegistry?.deleteAllReminders() ?: ToolResult(success = true, message = "تمام یادآورها حذف شدند.")
+                    val res = toolRegistry?.deleteAllReminders() ?: ToolResult(success = false, message = "سرویس یادآورها در دسترس نیست؛ هیچ یادآوری حذف نشد.", errorCode = "TOOL_REGISTRY_UNAVAILABLE")
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE, targetReminderId = null, lastMentionedReminderId = null),
                         executedResult = res,
                         suggestedReplies = listOf("یادآور جدید")
@@ -921,9 +927,9 @@ class ConversationalAiEngine(
                 val startDay = cal.timeInMillis
                 val endDay = startDay + 86400000L - 1
                 val res = toolRegistry?.deleteRemindersByDate(startDay, endDay, "امروز")
-                    ?: ToolResult(success = true, message = "یادآورهای امروز حذف شدند.")
+                    ?: ToolResult(success = false, message = "سرویس یادآورها در دسترس نیست؛ یادآورهای امروز حذف نشدند.", errorCode = "TOOL_REGISTRY_UNAVAILABLE")
                 return ConversationalResponse(
-                    replyText = res.message,
+                    replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                     newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
                     executedResult = res,
                     suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
@@ -937,9 +943,9 @@ class ConversationalAiEngine(
                 val startDay = cal.timeInMillis
                 val endDay = startDay + 86400000L - 1
                 val res = toolRegistry?.deleteRemindersByDate(startDay, endDay, "فردا")
-                    ?: ToolResult(success = true, message = "یادآورهای فردا حذف شدند.")
+                    ?: ToolResult(success = false, message = "سرویس یادآورها در دسترس نیست؛ یادآورهای فردا حذف نشدند.", errorCode = "TOOL_REGISTRY_UNAVAILABLE")
                 return ConversationalResponse(
-                    replyText = res.message,
+                    replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                     newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
                     executedResult = res,
                     suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
@@ -953,7 +959,7 @@ class ConversationalAiEngine(
                 if (first != null) {
                     val res = toolRegistry.deleteOrCancelReminder(first.id, isHardDelete = true)
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
                         executedResult = res,
                         suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
@@ -971,7 +977,7 @@ class ConversationalAiEngine(
                 if (last != null) {
                     val res = toolRegistry.deleteOrCancelReminder(last.id, isHardDelete = true)
                     return ConversationalResponse(
-                        replyText = res.message,
+                        replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
                         newState = state.copy(activeIntent = ConversationIntent.DELETE_REMINDER, awaitingField = AwaitingField.NONE),
                         executedResult = res,
                         suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
