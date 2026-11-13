@@ -567,6 +567,28 @@ class ConversationalAiEngineTest {
         assertEquals(SlotFillingStatus.IDLE, reschedule.newState.slotStatus)
         assertTrue(reschedule.replyText.contains("تغییر زمان انجام نشد"))
         assertFalse(reschedule.replyText.contains("جلو کشیده شد"))
+
+        val changeHour = engine.processTurn(
+            userInput = "ساعت قرار رو بکن ۱۰",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue(changeHour.replyText.contains("سرویس یادآورها در دسترس نیست"))
+        assertFalse(changeHour.replyText.contains("تغییر یافت"))
+
+        val advanceAlert = engine.processTurn(
+            userInput = "برای همین قرار نیم ساعت قبل هم اعلان بذار",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue(advanceAlert.replyText.contains("پیش‌اعلان تنظیم نشد"))
+
+        val cancelAlarm = engine.processTurn(
+            userInput = "یادآور رو لغو کن ولی قرار رو نگه دار",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue(cancelAlarm.replyText.contains("آلارم لغو نشد"))
     }
 }
 
