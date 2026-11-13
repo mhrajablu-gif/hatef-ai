@@ -58,13 +58,6 @@ class AssistantToolRegistry(
             )
         }
 
-        if (task.title.isBlank()) {
-            return ToolResult(
-                success = false,
-                message = "عنوان یادآور نمی‌تواند خالی باشد.",
-                errorCode = "MISSING_TITLE"
-            )
-        }
 
         if (task.triggerTimestamp <= 0) {
             return ToolResult(
