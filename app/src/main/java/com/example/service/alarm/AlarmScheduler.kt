@@ -31,9 +31,9 @@ object AlarmScheduler {
             cancelReminder(context, reminder.id)
             return AlarmScheduleResult.ALREADY_DUE
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) return AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED
-        // Clear stale main/advance alarms only after permission is confirmed.
+        // Clear stale main/advance alarms before attempting to replace them; never leave an old-time alarm active.
         cancelReminder(context, reminder.id)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) return AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED
 
         // Schedule primary alarm
         if (reminder.triggerTimestamp > now) {
