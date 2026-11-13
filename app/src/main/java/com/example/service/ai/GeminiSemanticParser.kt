@@ -282,8 +282,8 @@ class GeminiSemanticParser {
 
         val hasExplicitTitle = extracted.hasExplicitTitle
         val hasRelativeDateTime = extracted.rawTimePhrase.isRelativeDateTimePhrase()
-        val hasExplicitTime = extracted.hasExplicitTime || hasRelativeDateTime
-        val hasExplicitDate = extracted.hasExplicitDate || hasRelativeDateTime
+        val hasExplicitTime = analysis.hasExplicitTime || hasRelativeDateTime
+        val hasExplicitDate = analysis.hasExplicitDate || hasRelativeDateTime
         val analysis = PersianCommandAnalyzer.analyze(segment, referenceTimeMillis)
         val hasAmbiguousTimePeriod = analysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
 
