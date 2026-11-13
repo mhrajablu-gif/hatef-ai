@@ -633,19 +633,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun buildClarificationPrompt(task: ParsedTask): ClarificationPrompt {
+        val isAmbiguous = task.isAmbiguous || task.hasAmbiguousTimePeriod
         val missingDate = !task.hasExplicitDate && !task.hasResolvedRelativeDateTime
-        val missingTime = !task.hasExplicitTime || task.hasAmbiguousTimePeriod
+        val missingTime = !task.hasExplicitTime || isAmbiguous
         val type = if (missingDate || missingTime) ClarificationType.MISSING_TIME_OR_DATE else ClarificationType.MISSING_TITLE
         val hour = task.timeText.substringBefore(":")
         val question = when {
-            task.hasAmbiguousTimePeriod -> "منظورتان ساعت $hour صبح است یا شب؟"
+            isAmbiguous -> "منظورتان ساعت $hour صبح است یا شب؟"
             missingDate && missingTime -> "تاریخ و ساعت یادآوری «${task.title}» مشخص نشده است؛ چه روز و ساعتی مدنظرتان است؟"
             missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «${task.title}» چه روزی باشد؟"
             missingTime -> "تاریخ مشخص است؛ یادآوری «${task.title}» را چه ساعتی تنظیم کنم؟"
             else -> "لطفاً عنوان یا موضوع این یادآوری را بفرمایید."
         }
         val suggestions = when {
-            task.hasAmbiguousTimePeriod -> listOf("ساعت $hour صبح", "ساعت $hour شب")
+            isAmbiguous -> listOf("ساعت $hour صبح", "ساعت $hour شب")
             missingDate && missingTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
             missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
             missingTime -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
@@ -655,7 +656,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun confirmPreviewTask(task: ParsedTask) {
-        if (!task.hasExplicitTitle || !task.hasExplicitDate || !task.hasExplicitTime || task.isAmbiguous) {
+        if (!task.hasExplicitTitle || !task.hasExplicitDate || !task.hasExplicitTime || task.isAmbiguous || task.hasAmbiguousTimePeriod) {
             val prompt = buildClarificationPrompt(task)
             _uiState.value = _uiState.value.copy(
                 activeClarification = prompt,
@@ -704,7 +705,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmAllPreviewTasks() {
         viewModelScope.launch {
             val incompleteTask = _uiState.value.parsedTasksPreview.firstOrNull {
-                !it.hasExplicitTitle || !it.hasExplicitDate || !it.hasExplicitTime || it.isAmbiguous
+                !it.hasExplicitTitle || !it.hasExplicitDate || !it.hasExplicitTime || it.isAmbiguous || it.hasAmbiguousTimePeriod
             }
             if (incompleteTask != null) {
                 _uiState.value = _uiState.value.copy(
