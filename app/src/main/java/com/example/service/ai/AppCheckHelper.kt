@@ -41,6 +41,6 @@ fun configureAppCheck(context: Context) {
             Log.d(TAG, "Play Integrity App Check provider installed.")
         }
     } catch (e: Exception) {
-        Log.e(TAG, "Failed to initialize Firebase App Check", e)
+        Log.e(TAG, "Failed to initialize Firebase App Check. type=${e.javaClass.simpleName}", e)
     }
 }
