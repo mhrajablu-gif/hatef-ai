@@ -138,11 +138,6 @@ object PersianCommandAnalyzer {
                 reasoning.append("تاریخ صوتی شمسی ${dateExtraction.exactJalaliYear}/${dateExtraction.exactJalaliMonth}/${dateExtraction.exactJalaliDay} استخراج شد. ")
             } else if (dateExtraction.dayOffset != null) {
                 cal.add(Calendar.DAY_OF_YEAR, dateExtraction.dayOffset)
-                // If today and time has already passed without explicit "امروز"
-                if (dateExtraction.dayOffset == 0 && cal.timeInMillis <= referenceTimeMillis && !clean.contains("امروز")) {
-                    cal.add(Calendar.DAY_OF_YEAR, 1)
-                    reasoning.append("ساعت مشخص‌شده برای امروز سپری شده، به فردا منتقل شد. ")
-                }
                 targetTimestamp = cal.timeInMillis
                 reasoning.append("فاصله روز: ${dateExtraction.dayOffset} روز (${dateExtraction.matchedPhrase}). ")
 
