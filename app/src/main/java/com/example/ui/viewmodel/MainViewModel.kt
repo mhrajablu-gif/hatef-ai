@@ -514,28 +514,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val responseAmbiguousTime =
                     responseAnalysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
                 val relativePhrase = extracted.rawTimePhrase
-                val resolvedRelativeDateTime =
-                    (relativePhrase.contains("دقیقه") || relativePhrase.contains("ساعت")) &&
-                    (relativePhrase.contains("دیگه") || relativePhrase.contains("بعد") || relativePhrase.contains("دیگر"))
-                val extractedHasDate = extracted.hasExplicitDate || resolvedRelativeDateTime
+                val resolvedRelativeDateTime = responseAnalysis.hasExplicitDate && responseAnalysis.hasExplicitTime && responseAnalysis.targetTimestamp != null
+                val extractedHasDate = extracted.hasExplicitDate || responseAnalysis.hasExplicitDate || resolvedRelativeDateTime
                 val hasDate = tentative.hasExplicitDate || extractedHasDate
-                val hasTime = tentative.hasExplicitTime ||
-                    (extracted.hasExplicitTime && !responseAmbiguousTime)
+                val responseHasTime = extracted.hasExplicitTime || responseAnalysis.hasExplicitTime || resolvedRelativeDateTime
+                val hasTime = tentative.hasExplicitTime || (responseHasTime && !responseAmbiguousTime)
 
                 val mergedCalendar = Calendar.getInstance().apply {
                     timeInMillis = tentative.triggerTimestamp
                 }
                 val answerCalendar = Calendar.getInstance().apply {
-                    timeInMillis = extracted.triggerTimestamp
+                    timeInMillis = responseAnalysis.targetTimestamp ?: extracted.triggerTimestamp
                 }
                 if (extractedHasDate) {
                     mergedCalendar.set(Calendar.YEAR, answerCalendar.get(Calendar.YEAR))
                     mergedCalendar.set(Calendar.MONTH, answerCalendar.get(Calendar.MONTH))
                     mergedCalendar.set(Calendar.DAY_OF_MONTH, answerCalendar.get(Calendar.DAY_OF_MONTH))
                 }
-                if (extracted.hasExplicitTime && !responseAmbiguousTime) {
-                    mergedCalendar.set(Calendar.HOUR_OF_DAY, answerCalendar.get(Calendar.HOUR_OF_DAY))
-                    mergedCalendar.set(Calendar.MINUTE, answerCalendar.get(Calendar.MINUTE))
+                if (responseHasTime && !responseAmbiguousTime) {
+                    mergedCalendar.set(Calendar.HOUR_OF_DAY, responseAnalysis.hour ?: answerCalendar.get(Calendar.HOUR_OF_DAY))
+                    mergedCalendar.set(Calendar.MINUTE, responseAnalysis.minute ?: answerCalendar.get(Calendar.MINUTE))
                     mergedCalendar.set(Calendar.SECOND, 0)
                     mergedCalendar.set(Calendar.MILLISECOND, 0)
                 }
