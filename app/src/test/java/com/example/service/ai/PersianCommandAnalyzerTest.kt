@@ -367,4 +367,20 @@ class PersianCommandAnalyzerTest {
         assertFalse("عدد ۳۵ نباید در عنوان باقی بماند", result.title.contains("35"))
         assertNotNull(result.targetTimestamp)
     }
+
+    @Test
+    fun persianClockWithColonAndMinuteWordKeepsMinuteOutOfTitle() {
+        val result = PersianCommandAnalyzer.analyze(
+            "فردا ساعت ۱۸:۳۵ دقیقه باید برم بانک",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertEquals(18, result.hour)
+        assertEquals(35, result.minute)
+        assertEquals(ValidationStatus.VALID, result.validationStatus)
+        assertTrue(result.title.contains("بانک"))
+        assertFalse(result.title.contains("۳۵"))
+        assertNotNull(result.targetTimestamp)
+    }
 }
