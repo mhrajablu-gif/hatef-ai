@@ -68,6 +68,17 @@ jobs:
       - name: Run Android lint
         run: ./gradlew :app:lintDebug --stacktrace --no-daemon
 
+      - name: Upload Android lint report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: Yadet-lint-reports
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Build APK
         run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
