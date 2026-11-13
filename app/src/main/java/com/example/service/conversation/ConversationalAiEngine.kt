@@ -1531,7 +1531,21 @@ class ConversationalAiEngine(
         val hasClockTime = clean.contains("ساعت") && Regex("""ساعت\s*[\d۰-۹]{1,2}""").containsMatchIn(clean)
         val isConciseCalendarEntry = hasWeekday && hasClockTime && !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry) {
+        // Natural spoken plans may omit "یادم بنداز" (e.g. "پس فردا ساعت سه و نیم بعدازظهر نون بخرم").
+        // Require a future date, a concrete time expression, and an actionable first-person verb.
+        val hasFutureDate = listOf("امروز", "فردا", "پس فردا", "پسفردا", "هفته بعد", "هفته آینده",
+            "شنبه", "یکشنبه", "دوشنبه", "سه شنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه").any { clean.contains(it) }
+        val hasTimeExpression = clean.contains("ساعت") || clean.contains("صبح") || clean.contains("ظهر") ||
+            clean.contains("عصر") || clean.contains("شب") || clean.contains("نیم ساعت") ||
+            clean.contains("یک ربع") || clean.contains("یه ربع")
+        val actionEndings = listOf("بخرم", "بگیرم", "برم", "بروم", "انجام بدم", "انجام دهم",
+            "تماس بگیرم", "زنگ بزنم", "پیگیری کنم", "تحویل بدم", "تحویل دهم")
+        val hasActionVerb = actionEndings.any { clean.endsWith(it) || clean.contains("$it ") }
+        val isImplicitTimedPlan = hasFutureDate && hasTimeExpression && hasActionVerb &&
+            !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement &&
+            !clean.contains("?") && !clean.contains("؟")
+
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry || isImplicitTimedPlan) {
             return true
         }
 
