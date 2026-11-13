@@ -380,7 +380,7 @@ class PersianCommandAnalyzerTest {
         assertEquals(35, result.minute)
         assertEquals(ValidationStatus.VALID, result.validationStatus)
         assertTrue(result.title.contains("بانک"))
-        assertFalse(result.title.contains("۳۵"))
+        assertFalse(result.title.contains("35"))
         assertNotNull(result.targetTimestamp)
     }
 }
