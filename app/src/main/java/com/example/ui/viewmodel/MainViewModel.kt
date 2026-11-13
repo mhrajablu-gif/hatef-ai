@@ -231,7 +231,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun sendChatMessage(text: String) {
         val clean = text.trim()
-        if (clean.isBlank()) return
+        if (clean.isBlank() || _uiState.value.isAiParsing) return
 
         val userMsg = com.example.service.conversation.ChatMessage(
             sender = com.example.service.conversation.MessageSender.USER,
@@ -243,24 +243,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
             try {
-                val response = conversationalEngine.processTurn(
-                    userInput = clean,
-                    currentState = _conversationState.value,
-                    recentHistory = updatedHistory
-                )
+                // Outer guard covers the complete intent-processing turn, not only the Gemini call.
+                val response = kotlinx.coroutines.withTimeout(22_000L) {
+                    conversationalEngine.processTurn(
+                        userInput = clean,
+                        currentState = _conversationState.value,
+                        recentHistory = updatedHistory
+                    )
+                }
 
                 _conversationState.value = response.newState
-
                 val assistantMsg = com.example.service.conversation.ChatMessage(
                     sender = com.example.service.conversation.MessageSender.ASSISTANT,
                     text = response.replyText,
                     actionCard = response.actionCard,
                     suggestedReplies = response.suggestedReplies
                 )
-
                 _chatMessages.value = _chatMessages.value + assistantMsg
-
-                // Speak response via TTS
                 ttsSpeaker.speak(response.replyText)
 
                 if (response.executedResult != null && response.executedResult.success) {
@@ -268,16 +267,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         infoMessage = response.executedResult.message
                     )
                 }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                android.util.Log.e("MainViewModel", "Chat turn timed out", e)
+                _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = "پاسخ‌گویی در زمان تعیین‌شده انجام نشد. لطفاً دوباره تلاش کنید؛ اگر تکرار شد، اتصال یا سرویس هوش مصنوعی را بررسی می‌کنیم."
+                )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("MainViewModel", "Chat turn failed", e)
+                val errorMessage = when {
+                    e is kotlinx.coroutines.TimeoutCancellationException ->
+                        "پاسخ‌گویی بیش از حد طول کشید و درخواست متوقف شد. لطفاً دوباره تلاش کنید."
+                    else ->
+                        "در پردازش پیام مشکلی پیش آمد. لطفاً دوباره تلاش کنید."
+                }
                 _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
                     sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                    text = "متأسفانه پاسخ این پیام دریافت نشد. اتصال اینترنت و وضعیت سرویس هوشمند را بررسی کنید و دوباره تلاش کنید."
+                    text = errorMessage
                 )
             } finally {
-                // Never leave the chat spinner active after a failed or cancelled turn.
                 _uiState.value = _uiState.value.copy(isAiParsing = false)
             }
         }
@@ -295,7 +305,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     card.task?.let { task ->
                         val result = toolRegistry.createReminder(task)
                         val confirmReply = if (result.success) {
-                            "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} با موفقیت تنظیم شد."
+                            result.message
                         } else {
                             "خطا در ایجاد یادآور: ${result.message}"
                         }
