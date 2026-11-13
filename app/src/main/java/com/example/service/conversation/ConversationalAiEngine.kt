@@ -1593,6 +1593,7 @@ class ConversationalAiEngine(
             timeText = if (analysis.hasExplicitTime && analysis.hour != null)
                 PersianDateEngine.formatPersianTime(analysis.hour, analysis.minute ?: 0)
             else PersianDateEngine.formatPersianTime(j.hour, j.minute),
+            repeatType = analysis.repeatType,
             isAmbiguous = isAmbiguous,
             clarificationQuestion = analysis.clarificationQuestion,
             hasExplicitTitle = true,
@@ -1781,7 +1782,27 @@ class ConversationalAiEngine(
         val hasClockTime = clean.contains("ساعت") && Regex("""ساعت\s*[\d۰-۹]{1,2}""").containsMatchIn(clean)
         val isConciseCalendarEntry = hasWeekday && hasClockTime && !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry) {
+        // Natural-language task statements: a concrete action paired with a date/time/recurrence
+        // is a reminder request even when the user does not say "یادم بنداز".
+        val hasNaturalTimeCue = hasClockTime ||
+            listOf("امروز", "فردا", "پسفردا", "پس‌فردا", "هر روز", "روزانه",
+                "هر هفته", "هفتگی", "هر ماه", "ماهانه", "هر سال", "سالانه",
+                "شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه",
+                "یک ربع دیگه", "نیم ساعت دیگه", "دقیقه دیگه", "ساعت دیگه")
+                .any { clean.contains(it) }
+        val hasActionableTask = listOf(
+            "ورزش کنم", "تمرین کنم", "مطالعه کنم", "کتاب بخوانم", "کتاب بخونم",
+            "تماس بگیرم", "زنگ بزنم", "برم ", "بروم ", "مراجعه کنم",
+            "خرید کنم", "بخرم", "پرداخت کنم", "واریز کنم", "ارسال کنم",
+            "تحویل بدم", "تحویل دهم", "پیگیری کنم", "دارو بخورم",
+            "قرص بخورم", "مصرف کنم", "جلسه دارم", "قرار دارم", "امتحان دارم"
+        ).any { clean.contains(it) }
+        val isNaturalLanguageReminder = hasNaturalTimeCue && hasActionableTask &&
+            !clean.endsWith("?") && !clean.endsWith("؟") &&
+            !clean.contains("معمولاً") && !clean.contains("معمولا") &&
+            !clean.contains("عادت دارم") && !clean.contains("به نظرت")
+
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry || isNaturalLanguageReminder) {
             return true
         }
 
