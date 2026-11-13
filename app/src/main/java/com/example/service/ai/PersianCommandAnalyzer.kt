@@ -444,6 +444,30 @@ object PersianCommandAnalyzer {
     )
 
     private fun extractClockTime(clean: String): ExtractedClock {
+        // Speech-to-text sometimes removes the colon from HH:mm and emits "ساعت ۱۸۳۵ دقیقه".
+        // Accept compact HHmm only after the explicit word "ساعت" and validate both parts.
+        val compactTimeRegex = Regex("""ساعت\s*(\d{4})(?:\s*دقیقه)?(?!\d)""")
+        val compactMatch = compactTimeRegex.find(clean)
+        if (compactMatch != null) {
+            val digits = compactMatch.groupValues[1]
+            val compactHour = digits.substring(0, 2).toIntOrNull()
+            val compactMinute = digits.substring(2, 4).toIntOrNull()
+            if (compactHour != null && compactHour in 0..23 &&
+                compactMinute != null && compactMinute in 0..59
+            ) {
+                return ExtractedClock(
+                    rawHour = compactHour,
+                    rawMinute = compactMinute,
+                    period = if (compactHour >= 12) "عصر" else null,
+                    isPeriodSpecified = compactHour >= 12,
+                    resolvedHour = compactHour,
+                    resolvedMinute = compactMinute,
+                    hasExplicitHour = true,
+                    matchedPhrase = compactMatch.value
+                )
+            }
+        }
+
         // Matches expressions like:
         // ساعت 6:30 عصر / ساعت 6 عصر / ساعت 6 و نیم عصر / ساعت 18:30 / 6 صبح / 7 عصر / ساعت 6
         val clockRegex = Regex("""(?:ساعت\s*)?(\d{1,2})(?::(\d{1,2}))?(?:\s*و\s*(نیم|ربع|15|30))?\s*(صبح|بامداد|ظهر|عصر|غروب|شب|بعدازظهر)?(?!\s*روز)""")
