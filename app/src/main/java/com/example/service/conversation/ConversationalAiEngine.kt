@@ -58,6 +58,19 @@ class ConversationalAiEngine(
             }
         }
 
+        // Answer calendar facts locally; a date/weekday question is not a reminder command.
+        val calendarAnswer = answerCalendarQuestion(cleanInput, referenceTimeMillis, timeZone)
+        if (calendarAnswer != null) {
+            return ConversationalResponse(
+                replyText = calendarAnswer,
+                newState = currentState.copy(
+                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                )
+            )
+        }
+
         // 2. Check for explicit corrections to previous statements ("نه، منظورم فردا نبود، پسفردا بود")
         if (isCorrection(cleanInput) && currentState.draftTask != null) {
             return handleCorrection(cleanInput, currentState, referenceTimeMillis, timeZone)
@@ -156,6 +169,54 @@ class ConversationalAiEngine(
         )
     }
 
+    /**
+     * Handles simple calendar questions that belong to reminder scheduling.
+     * It deliberately does not create or modify reminders.
+     */
+    private fun answerCalendarQuestion(
+        input: String,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): String? {
+        val normalized = input.lowercase()
+            .replace('‌', ' ')
+            .replace("ي", "ی")
+            .replace("ك", "ک")
+
+        val asksWeekday = normalized.contains("چند شنبه") ||
+            normalized.contains("چندشنبه") ||
+            normalized.contains("روز هفته")
+        val asksDayOfMonth = normalized.contains("چندمین روز ماه") ||
+            normalized.contains("چندمین روزِ ماه") ||
+            normalized.contains("چندم ماه") ||
+            normalized.contains("چندمه")
+
+        if (!asksWeekday && !asksDayOfMonth) return null
+
+        val dayOffset = when {
+            normalized.contains("پس فردا") || normalized.contains("پسفردا") -> 2
+            normalized.contains("فردا") -> 1
+            normalized.contains("امروز") -> 0
+            else -> return null
+        }
+
+        val targetCalendar = Calendar.getInstance(timeZone).apply {
+            timeInMillis = referenceTimeMillis
+            add(Calendar.DAY_OF_YEAR, dayOffset)
+        }
+        val targetTimestamp = targetCalendar.timeInMillis
+        val jalali = PersianDateEngine.timestampToJalali(targetTimestamp, timeZone)
+        val dayLabel = when (dayOffset) {
+            0 -> "امروز"
+            1 -> "فردا"
+            else -> "پس‌فردا"
+        }
+
+        return when {
+            asksWeekday -> "${dayLabel} ${PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)} است."
+            else -> "${dayLabel} روز ${PersianDateEngine.toPersianDigits(jalali.day)} ماه ${jalali.monthName} است."
+        }
+    }
     /**
      * Handles answering an active clarification question
      */
