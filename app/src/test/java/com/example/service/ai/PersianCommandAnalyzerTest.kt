@@ -385,4 +385,26 @@ class PersianCommandAnalyzerTest {
         assertFalse(result.title.contains("دقیقه"))
         assertNotNull(result.targetTimestamp)
     }
+    @Test
+    fun dailyRecurrenceIsDetectedAndRemovedFromReminderTitle() {
+        val result = PersianCommandAnalyzer.analyze(
+            "هر روز ساعت ۱۰ صبح ورزش کنم",
+            baseTime,
+            tehranTimeZone
+        )
+        assertEquals("DAILY", result.repeatType)
+        assertTrue(result.title.contains("ورزش"))
+        assertFalse(result.title.contains("هر روز"))
+        assertEquals(10, result.hour)
+        assertNotNull(result.targetTimestamp)
+    }
+
+    @Test
+    fun yearlyAndWorkdayRecurrenceAreDetected() {
+        val yearly = PersianCommandAnalyzer.analyze("هر سال ساعت ۹ صبح تولدم را جشن بگیرم", baseTime, tehranTimeZone)
+        val workdays = PersianCommandAnalyzer.analyze("هر روز کاری ساعت ۸ صبح دارو بخورم", baseTime, tehranTimeZone)
+        assertEquals("YEARLY", yearly.repeatType)
+        assertEquals("WORKDAYS", workdays.repeatType)
+    }
+
 }
