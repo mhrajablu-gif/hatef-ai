@@ -204,47 +204,67 @@ class ConversationalAiEngine(
                 if (draft != null) {
                     val timeAnalyzed = PersianCommandAnalyzer.analyze(input, referenceTimeMillis, timeZone)
                     val isAmbiguous = timeAnalyzed.validationStatus == ValidationStatus.AMBIGUOUS
-                    val updated = if (timeAnalyzed.targetTimestamp != null) {
-                        val j = PersianDateEngine.timestampToJalali(timeAnalyzed.targetTimestamp, timeZone)
+                    val dateProvided = timeAnalyzed.hasExplicitDate
+                    val timeProvided = timeAnalyzed.hasExplicitTime
+                    val updated = if (dateProvided || timeProvided) {
+                        val mergedCalendar = Calendar.getInstance(timeZone).apply { timeInMillis = draft.triggerTimestamp }
+                        if (dateProvided) {
+                            val dateTs = timeAnalyzed.targetTimestamp ?: placeholderTimestampForDate(
+                                timeAnalyzed.jalaliDateText, referenceTimeMillis, timeZone
+                            )
+                            val dateCalendar = Calendar.getInstance(timeZone).apply { timeInMillis = dateTs }
+                            mergedCalendar.set(Calendar.YEAR, dateCalendar.get(Calendar.YEAR))
+                            mergedCalendar.set(Calendar.MONTH, dateCalendar.get(Calendar.MONTH))
+                            mergedCalendar.set(Calendar.DAY_OF_MONTH, dateCalendar.get(Calendar.DAY_OF_MONTH))
+                        }
+                        if (timeProvided) {
+                            val answerHour = timeAnalyzed.hour ?: mergedCalendar.get(Calendar.HOUR_OF_DAY)
+                            val answerMinute = timeAnalyzed.minute ?: 0
+                            mergedCalendar.set(Calendar.HOUR_OF_DAY, answerHour)
+                            mergedCalendar.set(Calendar.MINUTE, answerMinute)
+                            mergedCalendar.set(Calendar.SECOND, 0)
+                            mergedCalendar.set(Calendar.MILLISECOND, 0)
+                        }
+                        val mergedTimestamp = mergedCalendar.timeInMillis
+                        val mergedJalali = PersianDateEngine.timestampToJalali(mergedTimestamp, timeZone)
                         draft.copy(
-                            triggerTimestamp = timeAnalyzed.targetTimestamp,
-                            jalaliDateText = timeAnalyzed.jalaliDateText ?: j.formatPersianNumeric(),
-                            timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
-                            hasExplicitTime = true,
-                            hasExplicitDate = true,
+                            triggerTimestamp = mergedTimestamp,
+                            jalaliDateText = mergedJalali.formatPersianNumeric(),
+                            timeText = PersianDateEngine.formatPersianTime(mergedJalali.hour, mergedJalali.minute),
+                            hasExplicitDate = draft.hasExplicitDate || dateProvided,
+                            hasExplicitTime = if (isAmbiguous) false else (draft.hasExplicitTime || timeProvided),
                             isAmbiguous = isAmbiguous,
                             clarificationQuestion = timeAnalyzed.clarificationQuestion
                         )
-                    } else {
-                        val simpleHour = parseSimpleColloquialHour(input, referenceTimeMillis, timeZone)
-                        if (simpleHour != null) {
-                            val j = PersianDateEngine.timestampToJalali(simpleHour, timeZone)
-                            draft.copy(
-                                triggerTimestamp = simpleHour,
-                                jalaliDateText = j.formatPersianNumeric(),
-                                timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
-                                hasExplicitTime = true,
-                                hasExplicitDate = true,
-                                isAmbiguous = false,
-                                clarificationQuestion = null
-                            )
-                        } else null
-                    }
+                    } else null
 
                     if (updated != null) {
                         if (updated.isAmbiguous) {
+                            val q = updated.clarificationQuestion ?: "منظورتان صبح است یا عصر؟"
                             return ConversationalResponse(
-                                replyText = updated.clarificationQuestion ?: "منظورتان صبح است یا عصر؟",
+                                replyText = q,
                                 newState = state.copy(
                                     draftTask = updated,
                                     awaitingField = AwaitingField.AMBIGUOUS_HOUR_AM_PM,
                                     slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
-                                    lastAssistantQuestion = updated.clarificationQuestion
+                                    lastAssistantQuestion = q
                                 ),
                                 suggestedReplies = listOf("صبح", "عصر")
                             )
                         }
                         return proceedToConfirmationOrCompletion(updated, state)
+                    } else {
+                        val q = timeAnalyzed.clarificationQuestion ?: "هنوز تاریخ یا ساعت مشخص نشده است؛ لطفاً یک تاریخ یا ساعت دقیق بفرمایید."
+                        return ConversationalResponse(
+                            replyText = q,
+                            newState = state.copy(
+                                activeIntent = ConversationIntent.CREATE_REMINDER,
+                                awaitingField = AwaitingField.TIME_OR_DATE,
+                                slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+                                lastAssistantQuestion = q
+                            ),
+                            suggestedReplies = timeAnalyzed.quickSuggestions
+                        )
                     }
                 }
             }
