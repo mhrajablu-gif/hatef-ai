@@ -86,8 +86,9 @@ class ConversationalAiEngineTest {
             currentState = state,
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertEquals("وضعیت باید COMPLETED شود", SlotFillingStatus.COMPLETED, turn4.newState.slotStatus)
-        assertTrue("پاسخ نهایی باید شامل تنظیم شدن باشد", turn4.replyText.contains("با موفقیت تنظیم شد"))
+        assertEquals("وضعیت گفت‌وگو باید COMPLETED شود", SlotFillingStatus.COMPLETED, turn4.newState.slotStatus)
+        assertTrue("بدون ابزار ثبت، باید صادقانه عدم انجام عملیات را اعلام کند", turn4.replyText.contains("سرویس ثبت یادآور"))
+        assertFalse("نباید موفقیت ساختگی اعلام شود", turn4.replyText.contains("با موفقیت تنظیم شد"))
     }
 
     /**
