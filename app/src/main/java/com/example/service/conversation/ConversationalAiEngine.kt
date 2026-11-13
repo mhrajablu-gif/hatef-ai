@@ -1259,8 +1259,10 @@ class ConversationalAiEngine(
                     repeatType = "DAILY",
                     recurrenceEndDate = endTs,
                     hasExplicitTitle = true,
-                    hasExplicitTime = true,
-                    hasExplicitDate = true
+                    hasExplicitTime = recurringTime.hasExplicitTime && !isAmbiguousRecurringTime,
+                    hasExplicitDate = true,
+                    isAmbiguous = isAmbiguousRecurringTime,
+                    clarificationQuestion = recurringTime.clarificationQuestion
                 )
                 return proceedToConfirmationOrCompletion(tentative, state)
             }
