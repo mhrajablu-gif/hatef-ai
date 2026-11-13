@@ -1223,7 +1223,7 @@ class ConversationalAiEngine(
             val hasTitle = cleanedTitle.isNotBlank() && !isGenericSubject(cleanedTitle)
 
             if (!hasTitle) {
-                val q = if (analysis.hasExplicitDate) "برای ${analysis.jalaliDateText} چه کاری رو باید یادتون بندازم؟" else "حتماً. برای چه کاری یادآوری تنظیم کنم؟"
+                val q = "حتماً. برای چه کاری یادآوری تنظیم کنم؟"
                 val tentative = ParsedTask(
                     title = "یادآوری روزانه",
                     triggerTimestamp = startTs,
