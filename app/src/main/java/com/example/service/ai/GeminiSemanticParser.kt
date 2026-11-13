@@ -283,8 +283,11 @@ class GeminiSemanticParser {
         val hasExplicitTitle = extracted.hasExplicitTitle
         val hasExplicitTime = extracted.hasExplicitTime
         val hasExplicitDate = extracted.hasExplicitDate || extracted.rawTimePhrase.isRelativeDateTimePhrase()
+        val analysis = PersianCommandAnalyzer.analyze(segment, referenceTimeMillis)
+        val hasAmbiguousTimePeriod = analysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
 
         val clarification = when {
+            hasAmbiguousTimePeriod -> "منظورتان ساعت ${extracted.timeText.substringBefore(":")} صبح است یا شب؟"
             !hasExplicitTime || !hasExplicitDate -> "برای یادآوری «${extracted.title}»، ${if (!hasExplicitDate && !hasExplicitTime) "تاریخ و ساعت" else if (!hasExplicitDate) "تاریخ" else "ساعت"} مشخص نشده است؛ لطفاً آن را تعیین کنید."
             !hasExplicitTitle -> "زمان یادآوری روی ${extracted.jalaliDateText} ساعت ${extracted.timeText} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
             else -> null
@@ -304,8 +307,9 @@ class GeminiSemanticParser {
             hasExplicitTime = hasExplicitTime,
             hasExplicitDate = hasExplicitDate,
             hasExplicitTitle = hasExplicitTitle,
-            isAmbiguous = clarification != null,
-            clarificationQuestion = clarification
+            isAmbiguous = hasAmbiguousTimePeriod,
+            clarificationQuestion = clarification,
+            analyzedResult = analysis
         )
     }
 
