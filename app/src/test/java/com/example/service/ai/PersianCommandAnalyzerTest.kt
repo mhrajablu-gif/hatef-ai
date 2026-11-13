@@ -381,6 +381,7 @@ class PersianCommandAnalyzerTest {
         assertEquals(ValidationStatus.VALID, result.validationStatus)
         assertTrue(result.title.contains("بانک"))
         assertFalse(result.title.contains("35"))
+        assertFalse(result.title.contains("دقیقه"))
         assertNotNull(result.targetTimestamp)
     }
 }
