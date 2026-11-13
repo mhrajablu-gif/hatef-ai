@@ -1185,8 +1185,10 @@ class ConversationalAiEngine(
         if (isNextYear && isDaily) {
             val currentJalali = PersianDateEngine.timestampToJalali(referenceTimeMillis, timeZone)
             val nextYear = currentJalali.year + 1
-            val hour = extractNumber(lowerInput) ?: 8
-            val min = 0
+            val recurringTime = PersianCommandAnalyzer.analyze(input, referenceTimeMillis, timeZone)
+            val hour = recurringTime.hour ?: currentJalali.hour
+            val min = recurringTime.minute ?: currentJalali.minute
+            val isAmbiguousRecurringTime = recurringTime.validationStatus == ValidationStatus.AMBIGUOUS
             val startTs = PersianDateEngine.jalaliToTimestamp(nextYear, 1, 1, hour, min, timeZone)
             val endTs = PersianDateEngine.jalaliToTimestamp(nextYear, 12, 29, 23, 59, timeZone)
             val startDateText = PersianDateEngine.toPersianDigits(String.format(java.util.Locale.ROOT, "%04d/01/01", nextYear))
@@ -1232,8 +1234,10 @@ class ConversationalAiEngine(
                     repeatType = "DAILY",
                     recurrenceEndDate = endTs,
                     hasExplicitTitle = false,
-                    hasExplicitTime = true,
-                    hasExplicitDate = true
+                    hasExplicitTime = recurringTime.hasExplicitTime && !isAmbiguousRecurringTime,
+                    hasExplicitDate = true,
+                    isAmbiguous = isAmbiguousRecurringTime,
+                    clarificationQuestion = recurringTime.clarificationQuestion
                 )
                 return ConversationalResponse(
                     replyText = q,
