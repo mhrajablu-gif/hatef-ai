@@ -147,8 +147,14 @@ class GeminiSemanticParser {
                - "advanceAlertMinutes": Integer (e.g. 15, 30, or 0)
                - "priority": 0 for normal, 1 for important ("مهم"), 2 for urgent ("فوری")
                - "category": One of "کاری", "شخصی", "سلامت", "خرید", "عمومی"
+               - "hasExplicitDate": Boolean; true ONLY if the user explicitly supplied a date or relative day
+               - "hasExplicitTime": Boolean; true ONLY if the user explicitly supplied a clock time or relative duration
+               - "hasExplicitTitle": Boolean; true ONLY if an actual task/action title was understood
                - "isAmbiguous": Boolean
                - "clarificationQuestion": String or null
+               - NEVER infer a missing date, time, or task title. For a missing date, use TODAY only as a temporary placeholder and set hasExplicitDate=false.
+               - For a missing time, use the current reference time only as a temporary placeholder and set hasExplicitTime=false.
+               - Do not turn a past time today into tomorrow unless the user explicitly says tomorrow.
 
             Respond ONLY with a JSON object:
             {
@@ -187,14 +193,10 @@ class GeminiSemanticParser {
                 val tYear = obj.optInt("targetJalaliYear", curJalali.year)
                 val tMonth = obj.optInt("targetJalaliMonth", curJalali.month)
                 val tDay = obj.optInt("targetJalaliDay", curJalali.day)
-                val tHour = obj.optInt("targetHour", 9)
-                val tMin = obj.optInt("targetMinute", 0)
+                val tHour = obj.optInt("targetHour", curJalali.hour)
+                val tMin = obj.optInt("targetMinute", curJalali.minute)
 
                 targetMillis = PersianDateEngine.jalaliToTimestamp(tYear, tMonth, tDay, tHour, tMin)
-                if (targetMillis < referenceTimeMillis && tYear == curJalali.year && obj.isNull("targetJalaliYear")) {
-                    // Passed time today, assume tomorrow
-                    targetMillis += 24 * 3600 * 1000L
-                }
             }
 
             val targetJalali = PersianDateEngine.timestampToJalali(targetMillis)
@@ -202,9 +204,9 @@ class GeminiSemanticParser {
             val timeText = PersianDateEngine.formatPersianTime(targetJalali.hour, targetJalali.minute)
 
             val hasRelativeOffset = offsetMins != null && offsetMins > 0
-            val hasExplicitTime = obj.optBoolean("hasExplicitTime", true) || hasRelativeOffset
-            val hasExplicitDate = obj.optBoolean("hasExplicitDate", true) || hasRelativeOffset
-            val hasExplicitTitle = obj.optBoolean("hasExplicitTitle", true) && title.isNotBlank() && !title.startsWith("یادآوری ساعت")
+            val hasExplicitTime = obj.optBoolean("hasExplicitTime", false) || hasRelativeOffset
+            val hasExplicitDate = obj.optBoolean("hasExplicitDate", false) || hasRelativeOffset
+            val hasExplicitTitle = obj.optBoolean("hasExplicitTitle", false) && title.isNotBlank() && !title.startsWith("یادآوری ساعت")
 
             results.add(
                 ParsedTask(
