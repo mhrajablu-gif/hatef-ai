@@ -591,6 +591,11 @@ object PersianCommandAnalyzer {
         var reqWeekday: String? = null
         var phrase = ""
 
+        // A question such as «امروز چند شنبه است؟» asks for information; it is
+        // not a reminder date plus the weekday «شنبه». Do not extract either
+        // «امروز» or the trailing «شنبه» as scheduling constraints.
+        val isWeekdayQuestion = Regex("""(?:امروز\\s*)?چند\\s*شنبه""").containsMatchIn(clean)
+
         // Relative calendar days: support digits and spoken Persian numbers
         // e.g. "3 روز دیگه", "سه روز بعد", "بیست و سه روز دیگر".
         val relativeDaysPattern = Regex(
@@ -617,7 +622,7 @@ object PersianCommandAnalyzer {
         } else if (clean.contains("فردا")) {
             dayOffset = 1
             phrase = "فردا"
-        } else if (clean.contains("امروز") || clean.contains("امشب")) {
+        } else if (!isWeekdayQuestion && (clean.contains("امروز") || clean.contains("امشب"))) {
             dayOffset = 0
             phrase = if (clean.contains("امشب")) "امشب" else "امروز"
         }
@@ -636,7 +641,7 @@ object PersianCommandAnalyzer {
         )
 
         for (w in orderedWeekdays) {
-            if (clean.contains(w)) {
+            if (!isWeekdayQuestion && clean.contains(w)) {
                 val canonicalWd = normalizeWeekday(w)
                 reqWeekday = canonicalWd
 
