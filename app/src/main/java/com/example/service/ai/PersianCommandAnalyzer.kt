@@ -222,9 +222,12 @@ object PersianCommandAnalyzer {
         }
 
         val repeat = when {
+            clean.contains("هر روز کاری") || clean.contains("روزهای کاری") -> "WORKDAYS"
             clean.contains("هر روز") || clean.contains("روزانه") -> "DAILY"
-            clean.contains("هر هفته") || clean.contains("هفتگی") || clean.contains("هر جمعه") -> "WEEKLY"
+            clean.contains("هر هفته") || clean.contains("هفتگی") ||
+                listOf("هر شنبه", "هر یکشنبه", "هر دوشنبه", "هر سه‌شنبه", "هر چهارشنبه", "هر پنجشنبه", "هر جمعه").any { clean.contains(it) } -> "WEEKLY"
             clean.contains("هر ماه") || clean.contains("ماهانه") -> "MONTHLY"
+            clean.contains("هر سال") || clean.contains("سالانه") -> "YEARLY"
             else -> "NONE"
         }
 
@@ -795,8 +798,8 @@ object PersianCommandAnalyzer {
             t = t.replace(PersianDateEngine.toEnglishDigits(matchedTime), " ")
         }
 
-        // Remove conversational time words and weekdays
-        t = t.replace(Regex("""(?:امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
+        // Remove date, recurrence and weekday words so they never pollute the reminder title.
+        t = t.replace(Regex("""(?:هر\s*روز|روزانه|هر\s*هفته|هفتگی|هر\s*ماه|ماهانه|هر\s*سال|سالانه|هر\s+جمعه|امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
         t = t.replace(Regex("""(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
         t = t.replace(Regex("""ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{1,2})?\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)?"""), " ")
         t = t.replace(Regex("""[\d۰-۹]{1,2}\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)"""), " ")
