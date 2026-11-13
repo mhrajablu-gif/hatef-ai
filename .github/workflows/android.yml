@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
@@ -13,10 +16,10 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: 'temurin'
           java-version: '21'
@@ -44,8 +47,20 @@ jobs:
       - name: Make Gradle Wrapper Executable
         run: chmod +x ./gradlew
 
-      - name: Build APK
-        run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
+      - name: Build APK (retry transient Gradle download failures)
+        run: |
+          for attempt in 1 2 3; do
+            echo "Gradle build attempt ${attempt}/3"
+            if ./gradlew :app:assembleDebug --stacktrace --no-daemon; then
+              exit 0
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Build failed; waiting 20 seconds before retry."
+              sleep 20
+            fi
+          done
+          echo "Gradle build failed after 3 attempts."
+          exit 1
 
       - name: Verify APK Output
         run: |
@@ -53,7 +68,7 @@ jobs:
           test -f app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Yadet-APK
           path: app/build/outputs/apk/debug/*.apk

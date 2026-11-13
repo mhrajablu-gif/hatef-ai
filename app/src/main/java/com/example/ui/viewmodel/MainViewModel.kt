@@ -432,11 +432,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updatedTask: ParsedTask = when (prompt.type) {
             ClarificationType.MISSING_TIME_OR_DATE -> {
                 val extracted = PersianDateEngine.extractPersianTask(cleanResponse)
-                val newTimestamp = if (extracted.hasExplicitTime || extracted.hasExplicitDate) {
-                    extracted.triggerTimestamp
-                } else {
-                    System.currentTimeMillis() + 3600 * 1000L
+                if (!extracted.hasExplicitTime && !extracted.hasExplicitDate) {
+                    val followUp = "هنوز تاریخ یا زمان مشخصی در پاسخ شما پیدا نکردم. لطفاً مثلاً بگویید «فردا ساعت ۹ صبح» یا «نیم ساعت دیگر»."
+                    val updatedPrompt = prompt.copy(
+                        question = followUp,
+                        quickSuggestions = listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+                    )
+                    _uiState.value = _uiState.value.copy(
+                        activeClarification = updatedPrompt,
+                        infoMessage = followUp
+                    )
+                    ttsSpeaker.speak(followUp)
+                    return
                 }
+                val newTimestamp = extracted.triggerTimestamp
                 val j = PersianDateEngine.timestampToJalali(newTimestamp)
                 val timeStr = PersianDateEngine.formatPersianTime(j.hour, j.minute)
                 val dateStr = j.formatPersianNumeric()
@@ -445,8 +454,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     triggerTimestamp = newTimestamp,
                     jalaliDateText = dateStr,
                     timeText = timeStr,
-                    hasExplicitTime = true,
-                    hasExplicitDate = true,
+                    hasExplicitTime = extracted.hasExplicitTime,
+                    hasExplicitDate = extracted.hasExplicitDate,
                     clarificationQuestion = null,
                     isAmbiguous = false
                 )

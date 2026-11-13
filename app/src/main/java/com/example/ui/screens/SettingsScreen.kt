@@ -1,10 +1,14 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import android.app.AlarmManager
+import android.content.Context
 import android.content.Intent
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -69,6 +73,18 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val alarmManager = remember { context.getSystemService(Context.ALARM_SERVICE) as AlarmManager }
+    var exactAlarmAllowed by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+        )
+    }
+    val exactAlarmSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        exactAlarmAllowed =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+    }
     val themeMode by viewModel.themeMode.collectAsState()
 
     val soundPrefs = remember { AlarmSoundPreferences(context) }
@@ -179,6 +195,40 @@ fun SettingsScreen(
                             onClick = { viewModel.setThemeMode(com.example.ui.theme.ThemeMode.SYSTEM) },
                             modifier = Modifier.weight(1f)
                         )
+                    }
+                }
+            }
+        }
+
+        // Section: Exact alarm access
+        item {
+            SectionCard(
+                title = "مجوز هشدار دقیق",
+                icon = Icons.Filled.Notifications
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = if (exactAlarmAllowed) {
+                            "مجوز هشدار دقیق فعال است؛ یادآورها می‌توانند در زمان تعیین‌شده اجرا شوند."
+                        } else {
+                            "برای اجرای یادآورها در ساعت دقیق، اجازه «هشدارها و یادآورها» را در تنظیمات اندروید فعال کنید. بدون این اجازه، برنامه زمان هشدار را به‌صورت تقریبی جایگزین نمی‌کند."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                    if (!exactAlarmAllowed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        Button(
+                            onClick = {
+                                val requestIntent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                exactAlarmSettingsLauncher.launch(requestIntent)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("فعال‌سازی هشدار دقیق")
+                        }
                     }
                 }
             }
