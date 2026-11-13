@@ -222,7 +222,10 @@ class AssistantToolRegistry(
             // Re-schedule alarm to apply any time or advance-alert updates.
             val alarmWarning = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
                 alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
-            } else null
+            } else {
+                AlarmScheduler.cancelReminder(context, id)
+                null
+            }
             ToolResult(
                 success = true,
                 message = alarmWarning ?: "یادآور «${updated.title}» با موفقیت ویرایش و اعلان آن به‌روزرسانی شد.",
@@ -363,7 +366,10 @@ class AssistantToolRegistry(
             repository.update(updated)
             val alarmWarning = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
                 alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
-            } else null
+            } else {
+                AlarmScheduler.cancelReminder(context, id)
+                null
+            }
             val alertDesc = if (advanceAlertMinutes > 0) {
                 "پیش‌اعلان $advanceAlertMinutes دقیقه قبل برای «${updated.title}» فعال شد."
             } else {
