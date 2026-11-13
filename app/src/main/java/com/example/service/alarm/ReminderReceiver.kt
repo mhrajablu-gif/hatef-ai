@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 class ReminderReceiver : BroadcastReceiver() {
 
     companion object {
-        const val CHANNEL_ID = "hatef_reminders_channel"
+        const val CHANNEL_ID = "hatef_reminders_channel_v2"
         const val CHANNEL_NAME = "یادآوری‌های یادت"
     }
 
