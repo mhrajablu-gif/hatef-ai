@@ -222,9 +222,12 @@ object PersianCommandAnalyzer {
         }
 
         val repeat = when {
+            clean.contains("هر روز کاری") || clean.contains("روزهای کاری") -> "WORKDAYS"
             clean.contains("هر روز") || clean.contains("روزانه") -> "DAILY"
-            clean.contains("هر هفته") || clean.contains("هفتگی") || clean.contains("هر جمعه") -> "WEEKLY"
+            clean.contains("هر هفته") || clean.contains("هفتگی") ||
+                listOf("هر شنبه", "هر یکشنبه", "هر دوشنبه", "هر سه‌شنبه", "هر چهارشنبه", "هر پنجشنبه", "هر جمعه").any { clean.contains(it) } -> "WEEKLY"
             clean.contains("هر ماه") || clean.contains("ماهانه") -> "MONTHLY"
+            clean.contains("هر سال") || clean.contains("سالانه") -> "YEARLY"
             else -> "NONE"
         }
 
