@@ -17,9 +17,10 @@ import kotlinx.coroutines.withTimeout
 class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
-    private val model by lazy {
-        Firebase.ai.generativeModel(
-            modelName = "gemini-3.8-flash"
+    private fun createModel(userContextSummary: String?): com.google.firebase.ai.GenerativeModel {
+        return Firebase.ai.generativeModel(
+            modelName = "gemini-3.8-flash",
+            systemInstruction = content { text(buildSystemPrompt(userContextSummary)) }
         )
     }
 
@@ -80,7 +81,9 @@ class GeneralConversationalAiService {
         recentHistory: List<ChatMessage>,
         userContextSummary: String?
     ): String {
-        val systemPrompt = buildSystemPrompt(userContextSummary)
+        // System behavior and user context belong in the model's systemInstruction,
+        // not in the user/model conversation history.
+        val model = createModel(userContextSummary)
 
         // 1. Filter out the current user message from prior history so it is not sent twice
         val priorHistory = if (recentHistory.isNotEmpty() &&
@@ -93,24 +96,29 @@ class GeneralConversationalAiService {
         }
 
         // 2. Build properly alternating conversation turns for startChat
+        // Keep only complete, correctly ordered user/model pairs. In particular, never
+        // invent a model reply to carry the system prompt as conversation history.
         val historyContentList = mutableListOf<com.google.firebase.ai.type.Content>()
-        historyContentList.add(content("user") { text(systemPrompt) })
-        historyContentList.add(content("model") { text("متوجه شدم. من «یادت»، دستیار هوشمند، دانا و همراه شما به زبان فارسی هستم.") })
-
-        // Extract clean alternating turns from prior history (up to last 8 messages)
-        val cleanPrior = priorHistory.takeLast(8)
-        var expectedSender = MessageSender.USER
-        for (msg in cleanPrior) {
-            if (msg.sender == expectedSender && msg.text.isNotBlank()) {
-                val role = if (msg.sender == MessageSender.USER) "user" else "model"
-                historyContentList.add(content(role) { text(msg.text.trim()) })
-                expectedSender = if (expectedSender == MessageSender.USER) MessageSender.ASSISTANT else MessageSender.USER
-            }
+        val cleanPrior = priorHistory.takeLast(8).toMutableList()
+        while (cleanPrior.isNotEmpty() && cleanPrior.first().sender != MessageSender.USER) {
+            cleanPrior.removeAt(0)
         }
 
-        // Ensure history ends on a 'model' turn so the subsequent sendMessage creates a valid user->model turn
-        if (historyContentList.isNotEmpty() && historyContentList.last().role == "user") {
-            historyContentList.removeAt(historyContentList.lastIndex)
+        var index = 0
+        while (index + 1 < cleanPrior.size) {
+            val userMessage = cleanPrior[index]
+            val assistantMessage = cleanPrior[index + 1]
+            if (userMessage.sender == MessageSender.USER &&
+                assistantMessage.sender == MessageSender.ASSISTANT &&
+                userMessage.text.isNotBlank() &&
+                assistantMessage.text.isNotBlank()
+            ) {
+                historyContentList.add(content("user") { text(userMessage.text.trim()) })
+                historyContentList.add(content("model") { text(assistantMessage.text.trim()) })
+                index += 2
+            } else {
+                index += 1
+            }
         }
 
         val chat = model.startChat(history = historyContentList)
