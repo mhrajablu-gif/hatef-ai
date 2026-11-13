@@ -1284,6 +1284,7 @@ class ConversationalAiEngine(
             triggerTimestamp = effectiveTs,
             jalaliDateText = analysis.jalaliDateText ?: j.formatPersianNumeric(),
             timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+            repeatType = analysis.repeatType,
             isAmbiguous = isAmbiguous,
             clarificationQuestion = analysis.clarificationQuestion,
             hasExplicitTitle = true,
