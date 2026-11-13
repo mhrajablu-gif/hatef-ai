@@ -76,12 +76,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val initialWelcomeMessage = com.example.service.conversation.ChatMessage(
         sender = com.example.service.conversation.MessageSender.ASSISTANT,
-        text = "سلام! من «یادت»، دستیار هوشمند شما هستم. می‌توانید هر سوالی درباره موضوعات مختلف (علمی، برنامه‌ریزی، فناوری و روزمره) بپرسید، یا دستوراتی مثل تنظیم، تغییر، جابجایی و حذف یادآورها («همه یادآورهام رو حذف کن») و تغییر تنظیمات برنامه را به من بگویید.",
+        text = "سلام! من دستیار مدیریت یادآورها و عادت‌های شما هستم. می‌توانید با زبان طبیعی و به‌صورت صوتی یا متنی، یادآور بسازید، زمان یا عنوانش را تغییر دهید، آن را جابه‌جا یا حذف کنید، برنامه‌های تکرارشونده بسازید و تنظیمات یادت را کنترل کنید. اگر اطلاعاتی مبهم یا ناقص باشد، قبل از اجرا از شما سؤال می‌پرسم.",
         suggestedReplies = listOf(
-            "همه یادآورهام رو حذف کن",
             "فردا ساعت ۱۰ یادم بنداز برم بانک",
-            "پوسته رو تاریک کن",
-            "تکنیک پومودورو چیه؟"
+            "هر روز به‌جز جمعه ساعت ۷ ورزش رو یادم بنداز",
+            "یادآورهای فردا رو نشون بده",
+            "پیش‌اعلان رو روی ۱۵ دقیقه بذار"
         )
     )
 
@@ -96,11 +96,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (state is VoiceState.Success && state.recognizedText.isNotBlank()) {
                     val recognized = state.recognizedText
                     speechManager.resetState()
-                    if (_uiState.value.isVoiceSheetOpen) {
+                    // The assistant tab has one conversation pipeline for both typed and spoken input.
+                    // Never route assistant-tab speech through the legacy one-shot command parser,
+                    // otherwise the recognized words bypass the visible chat history and lose context.
+                    if (_uiState.value.currentTab == NavTab.ASSISTANT || _uiState.value.isVoiceSheetOpen) {
                         sendChatMessage(recognized)
                     } else if (_uiState.value.activeClarification != null) {
                         provideClarification(recognized)
                     } else {
+                        // Preserve the existing quick-capture flow outside the assistant conversation.
                         parseSpokenCommand(recognized)
                     }
                 }

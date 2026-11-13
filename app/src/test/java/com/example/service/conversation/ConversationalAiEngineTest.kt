@@ -2,6 +2,7 @@ package com.example.service.conversation
 
 import com.example.data.engine.PersianDateEngine
 import com.example.data.model.ReminderEntity
+import com.example.service.ai.PersianCommandAnalyzer
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -540,5 +541,73 @@ class ConversationalAiEngineTest {
         assertEquals("نیت باید INFORMATIONAL_QA باشد", ConversationIntent.INFORMATIONAL_QA, turn2.newState.activeIntent)
         assertTrue("پاسخ باید توضیح علمی پراکندگی نور باشد", turn1.replyText.isNotBlank())
     }
+
+    /**
+     * A natural future plan with a time and an action verb is a reminder request,
+     * even when the user does not explicitly say "یادم بنداز".
+     */
+    @Test
+    fun testImplicitColloquialTimedPlanStartsReminderFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "پس فردا ساعت سه و نیم بعد از ظهر نون بخرم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull(turn.newState.draftTask)
+        assertTrue(turn.newState.draftTask?.title?.contains("نون") == true ||
+            turn.newState.draftTask?.title?.contains("نان") == true)
+        assertTrue(turn.newState.draftTask?.hasExplicitDate == true)
+        assertTrue(turn.newState.draftTask?.hasExplicitTime == true)
+        assertTrue(turn.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun testPersianAnalyzerParsesSpokenHalfHourAndCleansTitle() {
+        val parsed = PersianCommandAnalyzer.analyze(
+            "پس فردا ساعت سه و نیم بعد از ظهر نون بخرم",
+            fixedReferenceMillis,
+            tehranTimeZone
+        )
+
+        assertEquals(15, parsed.hour)
+        assertEquals(30, parsed.minute)
+        assertTrue(parsed.title.contains("نون"))
+        assertFalse(parsed.title.contains("بخرم"))
+        assertFalse(parsed.title.contains("پس فردا"))
+    }
+
+    /**
+     * Calendar questions about tomorrow must be answered as information,
+     * without opening reminder creation or asking for a reminder time.
+     */
+    @Test
+    fun testCalendarQuestionsDoNotBecomeReminderRequests() = runBlocking {
+        val weekdayTurn = engine.processTurn(
+            userInput = "فردا چند شنبه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertTrue(weekdayTurn.replyText.contains("سه‌شنبه"))
+        assertNull(weekdayTurn.newState.draftTask)
+        assertFalse(weekdayTurn.newState.isWaitingForAnswer())
+
+        val dayOfMonthTurn = engine.processTurn(
+            userInput = "فردا چندمین روز ماه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertTrue(dayOfMonthTurn.replyText.contains("۵"))
+        assertTrue(dayOfMonthTurn.replyText.contains("آبان"))
+        assertNull(dayOfMonthTurn.newState.draftTask)
+        assertFalse(dayOfMonthTurn.newState.isWaitingForAnswer())
+    }
+
 }
 

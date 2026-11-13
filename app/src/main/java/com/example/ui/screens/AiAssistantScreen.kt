@@ -202,7 +202,7 @@ fun AiAssistantScreen(
                         )
                     }
                     Text(
-                        text = "گفتگو، مشاوره و مدیریت تمام فرامین برنامه",
+                        text = "مدیریت هوشمند یادآورها، عادت‌ها و تنظیمات برنامه",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp

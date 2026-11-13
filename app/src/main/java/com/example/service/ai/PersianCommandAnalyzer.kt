@@ -705,7 +705,7 @@ object PersianCommandAnalyzer {
     }
 
     private fun extractCleanTitle(rawText: String, matchedDate: String, matchedTime: String): String {
-        var t = PersianDateEngine.toEnglishDigits(rawText)
+        var t = PersianDateEngine.toEnglishDigits(normalizeText(rawText))
 
         if (matchedDate.isNotBlank()) {
             t = t.replace(PersianDateEngine.toEnglishDigits(matchedDate), " ")
@@ -732,7 +732,7 @@ object PersianCommandAnalyzer {
         t = t.replace(Regex("""\s+دارم\s*$"""), " ")
         t = t.replace(Regex("""\s+کنم\s*$"""), " ")
         t = t.replace(Regex("""\s+بگیرم\s*$"""), " ")
-        t = t.replace(Regex("""\s+بخوانم\s*$"""), " ")
+        t = t.replace(Regex("""\s+(?:بخرم|بگیرم|بخوانم|برم|بروم|انجام\s+بدم|انجام\s+دهم|زنگ\s+بزنم|پیگیری\s+کنم|تحویل\s+بدم|تحویل\s+دهم)\s*[،.!؟?]*\s*$"""), " ")
 
         t = t.trim().trim('،', ' ', '.', ':', '-')
         return t
@@ -760,6 +760,19 @@ object PersianCommandAnalyzer {
             .replace("نیم ساعت", "30 دقیقه")
             .replace("ده دقیقه", "10 دقیقه")
             .replace("بیست دقیقه", "20 دقیقه")
+
+        // Normalize common spoken half-hour expressions and "بعد از ظهر".
+        s = s.replace("بعد از ظهر", "بعدازظهر")
+            .replace("بعداز ظهر", "بعدازظهر")
+        val spokenHours = listOf(
+            "دوازده" to "12", "یازده" to "11", "ده" to "10", "نه" to "9",
+            "هشت" to "8", "هفت" to "7", "شش" to "6", "شیش" to "6",
+            "پنج" to "5", "چهار" to "4", "سه" to "3", "دو" to "2", "یک" to "1", "یه" to "1"
+        )
+        for ((word, digit) in spokenHours) {
+            s = s.replace("ساعت $word و نیم", "ساعت $digit و نیم")
+                .replace("ساعت $word و ربع", "ساعت $digit و ربع")
+        }
 
         // Written clock hours
         s = s.replace("ساعت بیست و چهار", "ساعت 24")

@@ -58,6 +58,19 @@ class ConversationalAiEngine(
             }
         }
 
+        // Answer calendar facts locally; a date/weekday question is not a reminder command.
+        val calendarAnswer = answerCalendarQuestion(cleanInput, referenceTimeMillis, timeZone)
+        if (calendarAnswer != null) {
+            return ConversationalResponse(
+                replyText = calendarAnswer,
+                newState = currentState.copy(
+                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                )
+            )
+        }
+
         // 2. Check for explicit corrections to previous statements ("نه، منظورم فردا نبود، پسفردا بود")
         if (isCorrection(cleanInput) && currentState.draftTask != null) {
             return handleCorrection(cleanInput, currentState, referenceTimeMillis, timeZone)
@@ -156,6 +169,54 @@ class ConversationalAiEngine(
         )
     }
 
+    /**
+     * Handles simple calendar questions that belong to reminder scheduling.
+     * It deliberately does not create or modify reminders.
+     */
+    private fun answerCalendarQuestion(
+        input: String,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): String? {
+        val normalized = input.lowercase()
+            .replace('‌', ' ')
+            .replace("ي", "ی")
+            .replace("ك", "ک")
+
+        val asksWeekday = normalized.contains("چند شنبه") ||
+            normalized.contains("چندشنبه") ||
+            normalized.contains("روز هفته")
+        val asksDayOfMonth = normalized.contains("چندمین روز ماه") ||
+            normalized.contains("چندمین روزِ ماه") ||
+            normalized.contains("چندم ماه") ||
+            normalized.contains("چندمه")
+
+        if (!asksWeekday && !asksDayOfMonth) return null
+
+        val dayOffset = when {
+            normalized.contains("پس فردا") || normalized.contains("پسفردا") -> 2
+            normalized.contains("فردا") -> 1
+            normalized.contains("امروز") -> 0
+            else -> return null
+        }
+
+        val targetCalendar = Calendar.getInstance(timeZone).apply {
+            timeInMillis = referenceTimeMillis
+            add(Calendar.DAY_OF_YEAR, dayOffset)
+        }
+        val targetTimestamp = targetCalendar.timeInMillis
+        val jalali = PersianDateEngine.timestampToJalali(targetTimestamp, timeZone)
+        val dayLabel = when (dayOffset) {
+            0 -> "امروز"
+            1 -> "فردا"
+            else -> "پس‌فردا"
+        }
+
+        return when {
+            asksWeekday -> "${dayLabel} ${PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)} است."
+            else -> "${dayLabel} روز ${PersianDateEngine.toPersianDigits(jalali.day)} ماه ${jalali.monthName} است."
+        }
+    }
     /**
      * Handles answering an active clarification question
      */
@@ -1470,7 +1531,21 @@ class ConversationalAiEngine(
         val hasClockTime = clean.contains("ساعت") && Regex("""ساعت\s*[\d۰-۹]{1,2}""").containsMatchIn(clean)
         val isConciseCalendarEntry = hasWeekday && hasClockTime && !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry) {
+        // Natural spoken plans may omit "یادم بنداز" (e.g. "پس فردا ساعت سه و نیم بعدازظهر نون بخرم").
+        // Require a future date, a concrete time expression, and an actionable first-person verb.
+        val hasFutureDate = listOf("امروز", "فردا", "پس فردا", "پسفردا", "هفته بعد", "هفته آینده",
+            "شنبه", "یکشنبه", "دوشنبه", "سه شنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه").any { clean.contains(it) }
+        val hasTimeExpression = clean.contains("ساعت") || clean.contains("صبح") || clean.contains("ظهر") ||
+            clean.contains("عصر") || clean.contains("شب") || clean.contains("نیم ساعت") ||
+            clean.contains("یک ربع") || clean.contains("یه ربع")
+        val actionEndings = listOf("بخرم", "بگیرم", "برم", "بروم", "انجام بدم", "انجام دهم",
+            "تماس بگیرم", "زنگ بزنم", "پیگیری کنم", "تحویل بدم", "تحویل دهم")
+        val hasActionVerb = actionEndings.any { clean.endsWith(it) || clean.contains("$it ") }
+        val isImplicitTimedPlan = hasFutureDate && hasTimeExpression && hasActionVerb &&
+            !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement &&
+            !clean.contains("?") && !clean.contains("؟")
+
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry || isImplicitTimedPlan) {
             return true
         }
 
