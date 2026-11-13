@@ -632,7 +632,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             "یادآور «$title» ذخیره شد، اما زمان‌بندی زنگ ناموفق بود. تنظیمات مجوز هشدار را بررسی کن."
     }
 
+    private fun buildClarificationPrompt(task: ParsedTask): ClarificationPrompt {
+        val missingDate = !task.hasExplicitDate && !task.hasResolvedRelativeDateTime
+        val missingTime = !task.hasExplicitTime || task.hasAmbiguousTimePeriod
+        val type = if (missingDate || missingTime) ClarificationType.MISSING_TIME_OR_DATE else ClarificationType.MISSING_TITLE
+        val hour = task.timeText.substringBefore(":")
+        val question = when {
+            task.hasAmbiguousTimePeriod -> "منظورتان ساعت $hour صبح است یا شب؟"
+            missingDate && missingTime -> "تاریخ و ساعت یادآوری «${task.title}» مشخص نشده است؛ چه روز و ساعتی مدنظرتان است؟"
+            missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «${task.title}» چه روزی باشد؟"
+            missingTime -> "تاریخ مشخص است؛ یادآوری «${task.title}» را چه ساعتی تنظیم کنم؟"
+            else -> "لطفاً عنوان یا موضوع این یادآوری را بفرمایید."
+        }
+        val suggestions = when {
+            task.hasAmbiguousTimePeriod -> listOf("ساعت $hour صبح", "ساعت $hour شب")
+            missingDate && missingTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+            missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+            missingTime -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+            else -> listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
+        }
+        return ClarificationPrompt(type, question, task, suggestions)
+    }
+
     fun confirmPreviewTask(task: ParsedTask) {
+        if (!task.hasExplicitTitle || !task.hasExplicitDate || !task.hasExplicitTime || task.isAmbiguous) {
+            val prompt = buildClarificationPrompt(task)
+            _uiState.value = _uiState.value.copy(
+                activeClarification = prompt,
+                parsedTasksPreview = _uiState.value.parsedTasksPreview.filter { it != task },
+                infoMessage = "این یادآوری هنوز اطلاعات کامل ندارد و ذخیره نشد."
+            )
+            return
+        }
         viewModelScope.launch {
             val context = getApplication<Application>()
             val entity = ReminderEntity(
@@ -672,6 +703,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun confirmAllPreviewTasks() {
         viewModelScope.launch {
+            val incompleteTask = _uiState.value.parsedTasksPreview.firstOrNull {
+                !it.hasExplicitTitle || !it.hasExplicitDate || !it.hasExplicitTime || it.isAmbiguous
+            }
+            if (incompleteTask != null) {
+                _uiState.value = _uiState.value.copy(
+                    activeClarification = buildClarificationPrompt(incompleteTask),
+                    parsedTasksPreview = _uiState.value.parsedTasksPreview.filter { it != incompleteTask },
+                    infoMessage = "یکی از یادآوری‌ها ناقص است؛ ابتدا اطلاعات آن را کامل کنیم. هیچ یادآوری ناقصی ذخیره نشد."
+                )
+                return@launch
+            }
             val context = getApplication<Application>()
             val scheduleWarnings = mutableListOf<String>()
             for (task in _uiState.value.parsedTasksPreview) {
