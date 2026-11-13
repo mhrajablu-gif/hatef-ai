@@ -69,6 +69,7 @@ class ReminderReceiver : BroadcastReceiver() {
                             val timeStr = PersianDateEngine.formatPersianTime(jDate.hour, jDate.minute)
                             val updated = reminder.copy(
                                 triggerTimestamp = newTrigger,
+                                jalaliDateText = jDate.formatPersianNumeric(),
                                 timeText = timeStr,
                                 isCompleted = false
                             )
