@@ -318,6 +318,7 @@ class ConversationalAiEngine(
                         activeIntent = ConversationIntent.UPDATE_REMINDER,
                         awaitingField = AwaitingField.NONE,
                         pendingRescheduleDirection = null,
+                        pendingRescheduleOffsetMinutes = null,
                         targetReminderId = targetId,
                         lastMentionedReminderId = targetId,
                         slotStatus = if (result.success) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE
@@ -347,6 +348,24 @@ class ConversationalAiEngine(
                                     ),
                                     executedResult = delRes,
                                     suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                                )
+                            } else if (state.pendingRescheduleOffsetMinutes != null) {
+                                val result = toolRegistry.rescheduleReminder(
+                                    selectedId,
+                                    offsetMinutes = state.pendingRescheduleOffsetMinutes
+                                )
+                                return ConversationalResponse(
+                                    replyText = if (result.success) result.message else "تغییر زمان انجام نشد: ${result.message}",
+                                    newState = state.copy(
+                                        targetReminderId = selectedId,
+                                        lastMentionedReminderId = selectedId,
+                                        awaitingField = AwaitingField.NONE,
+                                        candidateReminderIds = emptyList(),
+                                        pendingRescheduleDirection = null,
+                                        pendingRescheduleOffsetMinutes = null
+                                    ),
+                                    executedResult = result,
+                                    suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
                                 )
                             } else if (state.pendingRescheduleDirection != null) {
                                 val question = if (state.pendingRescheduleDirection > 0) {
@@ -721,7 +740,8 @@ class ConversationalAiEngine(
                             activeIntent = ConversationIntent.UPDATE_REMINDER,
                             awaitingField = AwaitingField.WHICH_REMINDER_TO_SELECT,
                             candidateReminderIds = list.map { it.id },
-                            pendingRescheduleDirection = if (offsetMinutes == null) 1 else null
+                            pendingRescheduleDirection = if (offsetMinutes == null) 1 else null,
+                            pendingRescheduleOffsetMinutes = offsetMinutes
                         ),
                         actionCard = card,
                         suggestedReplies = list.mapIndexed { idx, _ -> "مورد ${when(idx){0->"اول"; 1->"دوم"; else->"سوم"}}" }
