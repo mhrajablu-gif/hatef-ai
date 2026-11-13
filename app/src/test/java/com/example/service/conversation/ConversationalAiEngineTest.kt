@@ -86,7 +86,9 @@ class ConversationalAiEngineTest {
             currentState = state,
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertEquals("بدون ابزار ثبت، وضعیت عملیات باید قابل‌تلاش مجدد بماند", SlotFillingStatus.IDLE, turn4.newState.slotStatus)
+        assertEquals("پس از شکست باید امکان تلاش مجدد حفظ شود", SlotFillingStatus.AWAITING_CONFIRMATION, turn4.newState.slotStatus)
+        assertEquals("پیش‌نویس یادآور نباید از دست برود", "رفتن به بانک", turn4.newState.draftTask?.title)
+        assertEquals("باید دوباره منتظر تأیید بماند", AwaitingField.EXECUTION_CONFIRMATION, turn4.newState.awaitingField)
         assertTrue("بدون ابزار ثبت، باید صادقانه عدم انجام عملیات را اعلام کند", turn4.replyText.contains("سرویس ثبت یادآور"))
         assertFalse("نباید موفقیت ساختگی اعلام شود", turn4.replyText.contains("با موفقیت تنظیم شد"))
     }
@@ -340,8 +342,9 @@ class ConversationalAiEngineTest {
 
         // Turn 4
         val turn4 = engine.processTurn("آره درسته ثبت کن", state, emptyList(), fixedReferenceMillis)
-        assertEquals(SlotFillingStatus.IDLE, turn4.newState.slotStatus)
+        assertEquals(SlotFillingStatus.AWAITING_CONFIRMATION, turn4.newState.slotStatus)
         assertTrue(turn4.replyText.contains("سرویس ثبت یادآور"))
+        assertNotNull("پیش‌نویس باید برای تلاش مجدد حفظ شود", turn4.newState.draftTask)
         assertFalse(turn4.replyText.contains("با موفقیت تنظیم شد"))
     }
 
@@ -541,6 +544,29 @@ class ConversationalAiEngineTest {
         )
         assertEquals("نیت باید INFORMATIONAL_QA باشد", ConversationIntent.INFORMATIONAL_QA, turn2.newState.activeIntent)
         assertTrue("پاسخ باید توضیح علمی پراکندگی نور باشد", turn1.replyText.isNotBlank())
+    }
+
+
+    /** عدم دسترسی به ابزارها نباید حذف گروهی یا جابه‌جایی را موفق جلوه دهد. */
+    @Test
+    fun test23_NoFalseSuccessWhenReminderToolsAreUnavailable() = runBlocking {
+        val deleteAll = engine.processTurn(
+            userInput = "همه یادآورهام رو حذف کن",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertFalse("حذف گروهی بدون ابزار نباید موفق باشد", deleteAll.executedResult?.success ?: true)
+        assertTrue(deleteAll.replyText.contains("سرویس یادآورها"))
+        assertFalse(deleteAll.replyText.contains("حذف شدند"))
+
+        val reschedule = engine.processTurn(
+            userInput = "نیم ساعت جلو بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(SlotFillingStatus.IDLE, reschedule.newState.slotStatus)
+        assertTrue(reschedule.replyText.contains("تغییر زمان انجام نشد"))
+        assertFalse(reschedule.replyText.contains("جلو کشیده شد"))
     }
 }
 
