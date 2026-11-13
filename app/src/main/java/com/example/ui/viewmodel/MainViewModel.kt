@@ -96,11 +96,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (state is VoiceState.Success && state.recognizedText.isNotBlank()) {
                     val recognized = state.recognizedText
                     speechManager.resetState()
-                    if (_uiState.value.isVoiceSheetOpen) {
+                    // The assistant tab has one conversation pipeline for both typed and spoken input.
+                    // Never route assistant-tab speech through the legacy one-shot command parser,
+                    // otherwise the recognized words bypass the visible chat history and lose context.
+                    if (_uiState.value.currentTab == NavTab.ASSISTANT || _uiState.value.isVoiceSheetOpen) {
                         sendChatMessage(recognized)
                     } else if (_uiState.value.activeClarification != null) {
                         provideClarification(recognized)
                     } else {
+                        // Preserve the existing quick-capture flow outside the assistant conversation.
                         parseSpokenCommand(recognized)
                     }
                 }
