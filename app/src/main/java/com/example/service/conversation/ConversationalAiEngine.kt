@@ -252,7 +252,7 @@ class ConversationalAiEngine(
                                 suggestedReplies = listOf("صبح", "عصر")
                             )
                         }
-                        return proceedToConfirmationOrCompletion(updated, state)
+                        return proceedToConfirmationOrCompletion(updated, state, referenceTimeMillis)
                     } else {
                         val q = timeAnalyzed.clarificationQuestion ?: "هنوز تاریخ یا ساعت مشخص نشده است؛ لطفاً یک تاریخ یا ساعت دقیق بفرمایید."
                         return ConversationalResponse(
@@ -1422,10 +1422,10 @@ class ConversationalAiEngine(
             )
         }
 
-        return proceedToConfirmationOrCompletion(tentative, state)
+        return proceedToConfirmationOrCompletion(tentative, state, referenceTimeMillis)
 
         // Case E: Ready to execute / confirm
-        return proceedToConfirmationOrCompletion(tentative, state)
+        return proceedToConfirmationOrCompletion(tentative, state, referenceTimeMillis)
     }
 
     private fun handleAppSettingCommand(input: String, state: ConversationState): ConversationalResponse? {
