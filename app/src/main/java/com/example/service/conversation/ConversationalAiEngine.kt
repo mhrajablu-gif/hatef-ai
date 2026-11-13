@@ -599,7 +599,7 @@ class ConversationalAiEngine(
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_REMINDER,
                         awaitingField = AwaitingField.NONE,
-                        slotStatus = SlotFillingStatus.COMPLETED
+                        slotStatus = if (res.success) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE
                     ),
                     executedResult = res,
                     suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
@@ -711,7 +711,7 @@ class ConversationalAiEngine(
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_REMINDER,
                         awaitingField = AwaitingField.NONE,
-                        slotStatus = SlotFillingStatus.COMPLETED
+                        slotStatus = if (res.success) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE
                     ),
                     executedResult = res,
                     suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
@@ -1319,11 +1319,11 @@ class ConversationalAiEngine(
             if (lower.contains("غیرفعال") || lower.contains("بردار") || lower.contains("خاموش") || lower.contains("صفر") || lower.contains("حذف")) {
                 val toolRes = toolRegistry?.updateDefaultAdvanceAlert(0)
                 return ConversationalResponse(
-                    replyText = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ تغییری اعمال نشد.",
+                    replyText = toolRes?.let { if (it.success) it.message else "تغییر تنظیمات انجام نشد: ${it.message}" } ?: "سرویس تنظیمات در دسترس نیست؛ تغییری اعمال نشد.",
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_APP_SETTINGS,
                         awaitingField = AwaitingField.NONE,
-                        slotStatus = SlotFillingStatus.COMPLETED
+                        slotStatus = if (toolRes?.success == true) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE
                     ),
                     executedResult = toolRes,
                     suggestedReplies = listOf("مشاهده تنظیمات", "یادآور جدید")
@@ -1331,7 +1331,7 @@ class ConversationalAiEngine(
             }
             val mins = extractMinuteOffset(lower) ?: extractNumber(lower) ?: 15
             val toolRes = toolRegistry?.updateDefaultAdvanceAlert(mins)
-            val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ پیش‌اعلان ${mins} دقیقه تنظیم نشد."
+            val msg = toolRes?.let { if (it.success) it.message else "تغییر پیش‌اعلان انجام نشد: ${it.message}" } ?: "سرویس تنظیمات در دسترس نیست؛ پیش‌اعلان ${mins} دقیقه تنظیم نشد."
             return ConversationalResponse(
                 replyText = msg,
                 newState = state.copy(
@@ -1351,7 +1351,7 @@ class ConversationalAiEngine(
             if (isDark || isLight) {
                 val mode = if (isDark) "تاریک" else "روشن"
                 val toolRes = toolRegistry?.updateAppTheme(mode)
-                val msg = toolRes?.message ?: "سرویس تنظیمات در دسترس نیست؛ تم $mode تغییر نکرد."
+                val msg = toolRes?.let { if (it.success) it.message else "تغییر تم انجام نشد: ${it.message}" } ?: "سرویس تنظیمات در دسترس نیست؛ تم $mode تغییر نکرد."
                 return ConversationalResponse(
                     replyText = msg,
                     newState = state.copy(
