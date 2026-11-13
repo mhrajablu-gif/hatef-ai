@@ -414,8 +414,9 @@ class ConversationalAiEngine(
         }
 
         val result = toolRegistry?.createReminder(task) ?: ToolResult(
-            success = true,
-            message = "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} با موفقیت تنظیم شد."
+            success = false,
+            message = "سرویس ثبت یادآور در دسترس نیست؛ هیچ یادآوری ذخیره نشد.",
+            errorCode = "TOOL_REGISTRY_UNAVAILABLE"
         )
 
         val entity = result.data as? ReminderEntity
@@ -524,7 +525,7 @@ class ConversationalAiEngine(
                     val r = list.first()
                     val res = toolRegistry.rescheduleReminder(r.id, offsetMinutes = offsetMinutes)
                     return ConversationalResponse(
-                        replyText = "قرار «${r.title}» برای فردا با ${PersianDateEngine.toPersianDigits(offsetMinutes / 60)} ساعت تعویق مجدداً تنظیم شد.",
+                        replyText = if (res.success) res.message else "تغییر زمان انجام نشد: ${res.message}",
                         newState = state.copy(
                             activeIntent = ConversationIntent.UPDATE_REMINDER,
                             targetReminderId = r.id,
@@ -554,7 +555,11 @@ class ConversationalAiEngine(
                 }
             }
             return ConversationalResponse(
-                replyText = "قرار فردا با ۲ ساعت تعویق با موفقیت به ساعت جدید منتقل شد.",
+                replyText = if (toolRegistry == null) {
+                    "سرویس یادآورها در دسترس نیست؛ هیچ تغییری انجام نشد."
+                } else {
+                    "برای فردا یادآوری پیدا نکردم؛ چیزی تغییر نکرده است."
+                },
                 newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
                 suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
             )
@@ -567,16 +572,16 @@ class ConversationalAiEngine(
             if (targetId != null && toolRegistry != null) {
                 val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMins)
                 return ConversationalResponse(
-                    replyText = "قرار مورد نظر برای هفته بعد با موفقیت منتقل و تنظیم شد.",
+                    replyText = if (res.success) res.message else "تغییر زمان انجام نشد: ${res.message}",
                     newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
                     executedResult = res,
                     suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
                 )
             } else {
                 return ConversationalResponse(
-                    replyText = "قرار مورد نظر با موفقیت برای یک هفته بعد منتقل شد.",
+                    replyText = "نتوانستم یادآور مشخصی را برای انتقال پیدا کنم؛ لطفاً بگویید کدام قرار را تغییر بدهم.",
                     newState = state.copy(activeIntent = ConversationIntent.UPDATE_REMINDER, awaitingField = AwaitingField.NONE),
-                    suggestedReplies = listOf("مشاهده یادآورها")
+                    suggestedReplies = listOf("مشاهده یادآورها", "یادآور جدید")
                 )
             }
         }
