@@ -36,7 +36,7 @@ data class ParsedTask(
 
     val hasAmbiguousTimePeriod: Boolean
         get() = analyzedResult?.ambiguousFields?.contains("HOUR_PERIOD_AM_PM") == true ||
-            (isAmbiguous && hasExplicitTime && hasExplicitDate)
+            isAmbiguous
 
     val needsClarification: Boolean
         get() = clarificationQuestion != null || isAmbiguous || hasAmbiguousTimePeriod || !hasExplicitTitle ||
