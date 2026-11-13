@@ -1798,6 +1798,7 @@ class ConversationalAiEngine(
             "قرص بخورم", "مصرف کنم", "جلسه دارم", "قرار دارم", "امتحان دارم"
         ).any { clean.contains(it) }
         val isNaturalLanguageReminder = hasNaturalTimeCue && hasActionableTask &&
+            !isRoutineOrPersonalStatement &&
             !clean.endsWith("?") && !clean.endsWith("؟") &&
             !clean.contains("معمولاً") && !clean.contains("معمولا") &&
             !clean.contains("عادت دارم") && !clean.contains("به نظرت")
