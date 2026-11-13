@@ -183,7 +183,7 @@ class ConversationalAiEngine(
                 if (draft != null) {
                     val resolved = resolveHourAmbiguity(input, draft, timeZone)
                     if (resolved != null) {
-                        return proceedToConfirmationOrCompletion(resolved, state)
+                        return proceedToConfirmationOrCompletion(resolved, state, referenceTimeMillis)
                     }
                 }
             }
@@ -196,7 +196,7 @@ class ConversationalAiEngine(
                         hasExplicitTitle = true,
                         clarificationQuestion = null
                     )
-                    return proceedToConfirmationOrCompletion(updated, state)
+                    return proceedToConfirmationOrCompletion(updated, state, referenceTimeMillis)
                 }
             }
 
@@ -383,7 +383,7 @@ class ConversationalAiEngine(
     /**
      * Proceeds to confirmation or asks remaining slot if incomplete
      */
-    private fun proceedToConfirmationOrCompletion(task: ParsedTask, state: ConversationState): ConversationalResponse {
+    private fun proceedToConfirmationOrCompletion(task: ParsedTask, state: ConversationState, referenceTimeMillis: Long): ConversationalResponse {
         if (task.isAmbiguous || task.hasAmbiguousTimePeriod) {
             val hour = task.timeText.substringBefore(":")
             val q = "منظورتان ساعت $hour صبح است یا شب؟"
@@ -441,7 +441,7 @@ class ConversationalAiEngine(
             )
         }
 
-        if (task.triggerTimestamp <= System.currentTimeMillis()) {
+        if (task.triggerTimestamp <= referenceTimeMillis) {
             val q = "زمان انتخاب‌شده در گذشته است؛ لطفاً تاریخ و ساعت آینده را مشخص کنید."
             val incomplete = task.copy(hasExplicitDate = false, hasExplicitTime = false, isAmbiguous = false)
             return ConversationalResponse(
@@ -569,7 +569,7 @@ class ConversationalAiEngine(
             )
         } else draft
 
-        return proceedToConfirmationOrCompletion(updatedTask, state)
+        return proceedToConfirmationOrCompletion(updatedTask, state, referenceTimeMillis)
     }
 
     /**
@@ -1264,7 +1264,7 @@ class ConversationalAiEngine(
                     isAmbiguous = isAmbiguousRecurringTime,
                     clarificationQuestion = recurringTime.clarificationQuestion
                 )
-                return proceedToConfirmationOrCompletion(tentative, state)
+                return proceedToConfirmationOrCompletion(tentative, state, referenceTimeMillis)
             }
         }
 
