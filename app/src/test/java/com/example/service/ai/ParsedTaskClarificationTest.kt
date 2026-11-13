@@ -60,6 +60,12 @@ class ParsedTaskClarificationTest {
     }
 
     @Test
+    fun ambiguousHourIsDetectedEvenWhenDateIsMissing() {
+        val ambiguous = task(hasTime = true, hasDate = false, ambiguous = true)
+        assertTrue(ambiguous.hasAmbiguousTimePeriod)
+        assertTrue(ambiguous.needsClarification)
+    }
+    @Test
     fun explicitDateAndTimeNeedNoClarification() {
         assertFalse(task(hasTime = true, hasDate = true).needsClarification)
     }
