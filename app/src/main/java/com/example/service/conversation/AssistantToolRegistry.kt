@@ -437,12 +437,16 @@ class AssistantToolRegistry(
             )
         }
 
-        val isScheduled = !rem.isCompleted && rem.triggerTimestamp > System.currentTimeMillis()
-        val alarmStatus = if (isScheduled) "آلارم فعال و زمان‌بندی شده است" else "آلارم غیرفعال یا گذشته است"
+        val hasFuturePendingRecord = !rem.isCompleted && rem.triggerTimestamp > System.currentTimeMillis()
+        val recordStatus = if (hasFuturePendingRecord) {
+            "رکورد یادآور فعال و دارای موعد آینده است"
+        } else {
+            "یادآور تکمیل‌شده یا موعدگذشته است"
+        }
 
         return ToolResult(
             success = true,
-            message = "رکورد «${rem.title}» در پایگاه داده موجود است. وضعیت: $alarmStatus (تاریخ: ${rem.jalaliDateText} ساعت ${rem.timeText}).",
+            message = "رکورد «${rem.title}» در پایگاه داده موجود است. $recordStatus (تاریخ: ${rem.jalaliDateText} ساعت ${rem.timeText}). توجه: از این مسیر نمی‌توان ثبت واقعی PendingIntent در سرویس آلارم اندروید را مستقیماً تأیید کرد؛ وضعیت بالا فقط از روی اطلاعات ذخیره‌شده بررسی شده است.",
             data = rem
         )
     }
