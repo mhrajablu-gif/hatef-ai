@@ -221,7 +221,7 @@ fun MonthWheelDrawerPicker(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.KeyboardArrowUp,
-                        contentDescription = "ماه قبل",
+                        contentDescription = "ماه بعد",
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                         modifier = Modifier.size(22.dp)
                     )
@@ -257,7 +257,7 @@ fun MonthWheelDrawerPicker(
                 ) {
                     Icon(
                         imageVector = Icons.Filled.KeyboardArrowDown,
-                        contentDescription = "ماه بعد",
+                        contentDescription = "ماه قبل",
                         tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                         modifier = Modifier.size(22.dp)
                     )
