@@ -627,7 +627,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (newStatus) {
                 AlarmScheduler.cancelReminder(context, reminder.id)
             } else {
-                AlarmScheduler.scheduleReminder(context, reminder.copy(isCompleted = false))
+                val scheduleMessage = alarmScheduleMessage(
+                    AlarmScheduler.scheduleReminder(context, reminder.copy(isCompleted = false)), reminder.title
+                )
+                if (scheduleMessage != null) _uiState.value = _uiState.value.copy(infoMessage = scheduleMessage)
             }
             com.example.widget.TodayTasksWidgetReceiver.updateAllWidgets(context)
         }
