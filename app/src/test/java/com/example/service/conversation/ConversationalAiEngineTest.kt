@@ -673,5 +673,30 @@ class ConversationalAiEngineTest {
         assertTrue("باید مقدار جابه‌جایی را بپرسد: ${turn.replyText}", turn.replyText.contains("چند دقیقه"))
     }
 
-}
+    @Test
+    fun naturalTimedTaskWithoutReminderPhraseEntersReminderFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "فردا ساعت ۱۰ ورزش کنم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull("درخواست باید به پیش‌نویس یادآور تبدیل شود", turn.newState.draftTask)
+        assertFalse("نباید پاسخ عمومی کلیشه‌ای برگردد", turn.replyText.contains("من سوال یا دیدگاه شما را بررسی کردم"))
+    }
 
+    @Test
+    fun recurringTimedTaskWithoutReminderPhraseEntersReminderFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "هر روز ساعت ۱۰ صبح ورزش کنم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull(turn.newState.draftTask)
+        assertEquals("DAILY", turn.newState.draftTask?.repeatType)
+    }
+
+}
