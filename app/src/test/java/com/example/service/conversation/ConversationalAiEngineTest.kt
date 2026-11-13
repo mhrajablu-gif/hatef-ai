@@ -632,5 +632,46 @@ class ConversationalAiEngineTest {
         assertFalse(turn.newState.draftTask?.hasExplicitTime ?: true)
         assertNull(turn.actionCard)
     }
+
+    @Test
+    fun test28_RescheduleWithoutDurationAsksInsteadOfGuessing() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "عقب بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.RESCHEDULE_OFFSET, turn.newState.awaitingField)
+        assertEquals(1, turn.newState.pendingRescheduleDirection)
+        assertTrue("باید مقدار جابه‌جایی را بپرسد: ${turn.replyText}", turn.replyText.contains("چند دقیقه"))
+    }
+
+    @Test
+    fun test29_RescheduleDurationFollowupNeverClaimsWithoutRegistry() = runBlocking {
+        val first = engine.processTurn(
+            userInput = "عقب بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        val second = engine.processTurn(
+            userInput = "نیم ساعت",
+            currentState = first.newState,
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue("نباید بدون ابزار ادعای تغییر زمان کند: ${second.replyText}", second.replyText.contains("سرویس یادآورها در دسترس نیست"))
+        assertEquals(AwaitingField.NONE, second.newState.awaitingField)
+    }
+
+    @Test
+    fun test30_AdvanceEarlierWithoutDurationAsksInsteadOfGuessing() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "جلو بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.RESCHEDULE_OFFSET, turn.newState.awaitingField)
+        assertEquals(-1, turn.newState.pendingRescheduleDirection)
+        assertTrue("باید مقدار جابه‌جایی را بپرسد: ${turn.replyText}", turn.replyText.contains("چند دقیقه"))
+    }
+
 }
 
