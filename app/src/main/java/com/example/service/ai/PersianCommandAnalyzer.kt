@@ -597,7 +597,7 @@ object PersianCommandAnalyzer {
         // A question such as «امروز چند شنبه است؟» asks for information; it is
         // not a reminder date plus the weekday «شنبه». Do not extract either
         // «امروز» or the trailing «شنبه» as scheduling constraints.
-        val isWeekdayQuestion = Regex("""(?:امروز\\s*)?چند\\s*شنبه""").containsMatchIn(clean)
+        val isWeekdayQuestion = Regex("""(?:امروز\s*)?چند\s*شنبه""").containsMatchIn(clean)
 
         // Relative calendar days: support digits and spoken Persian numbers
         // e.g. "3 روز دیگه", "سه روز بعد", "بیست و سه روز دیگر".
