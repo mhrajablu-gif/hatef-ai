@@ -705,7 +705,7 @@ object PersianCommandAnalyzer {
     }
 
     private fun extractCleanTitle(rawText: String, matchedDate: String, matchedTime: String): String {
-        var t = PersianDateEngine.toEnglishDigits(rawText)
+        var t = PersianDateEngine.toEnglishDigits(normalizeText(rawText))
 
         if (matchedDate.isNotBlank()) {
             t = t.replace(PersianDateEngine.toEnglishDigits(matchedDate), " ")
