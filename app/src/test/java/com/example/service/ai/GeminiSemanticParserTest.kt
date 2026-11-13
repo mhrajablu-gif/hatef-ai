@@ -37,5 +37,7 @@ class GeminiSemanticParserTest {
         assertTrue(task.hasExplicitDate)
         assertTrue(task.hasExplicitTime)
         assertFalse(task.needsClarification)
+        assertTrue(task.triggerTimestamp >= referenceTime + 29 * 60 * 1000L)
+        assertTrue(task.triggerTimestamp <= referenceTime + 31 * 60 * 1000L)
     }
 }
