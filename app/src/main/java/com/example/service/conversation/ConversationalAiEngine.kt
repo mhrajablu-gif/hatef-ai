@@ -203,6 +203,14 @@ class ConversationalAiEngine(
             AwaitingField.TIME_OR_DATE -> {
                 if (draft != null) {
                     val timeAnalyzed = PersianCommandAnalyzer.analyze(input, referenceTimeMillis, timeZone)
+                    if (timeAnalyzed.validationStatus == ValidationStatus.CONFLICT) {
+                        val q = timeAnalyzed.clarificationQuestion ?: "تاریخ‌های گفته‌شده با هم سازگار نیستند؛ لطفاً تاریخ را روشن کنید."
+                        return ConversationalResponse(
+                            replyText = q,
+                            newState = state.copy(lastAssistantQuestion = q),
+                            suggestedReplies = timeAnalyzed.quickSuggestions
+                        )
+                    }
                     val isAmbiguous = timeAnalyzed.validationStatus == ValidationStatus.AMBIGUOUS
                     val dateProvided = timeAnalyzed.hasExplicitDate
                     val timeProvided = timeAnalyzed.hasExplicitTime
@@ -540,6 +548,10 @@ class ConversationalAiEngine(
 
         val clean = input.replace("نه،", "").replace("نه", "").replace("منظورم", "").trim()
         val reAnalyzed = PersianCommandAnalyzer.analyze(clean, referenceTimeMillis, timeZone)
+        if (reAnalyzed.validationStatus == ValidationStatus.CONFLICT) {
+            val q = reAnalyzed.clarificationQuestion ?: "تاریخ‌های گفته‌شده با هم سازگار نیستند؛ لطفاً تاریخ را روشن کنید."
+            return ConversationalResponse(replyText = q, newState = state.copy(lastAssistantQuestion = q), suggestedReplies = reAnalyzed.quickSuggestions)
+        }
         val isAmbiguous = reAnalyzed.validationStatus == ValidationStatus.AMBIGUOUS
         val updatedTask = if (reAnalyzed.hasExplicitDate || reAnalyzed.hasExplicitTime) {
             val merged = Calendar.getInstance(timeZone).apply { timeInMillis = draft.triggerTimestamp }
