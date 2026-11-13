@@ -664,7 +664,7 @@ class ConversationalAiEngine(
 
         // 1. Rescheduling reference for Tomorrow ("قرار فردام رو دو ساعت عقب بنداز")
         if ((lower.contains("فردام") || lower.contains("فردا")) && (lower.contains("عقب بنداز") || lower.contains("به تعویق") || lower.contains("تاخیر") || lower.contains("دیرتر"))) {
-            val offsetMinutes = extractMinuteOffset(lower) ?: 120
+            val offsetMinutes = extractMinuteOffset(lower)
             val cal = Calendar.getInstance(timeZone).apply {
                 timeInMillis = referenceTimeMillis
                 add(Calendar.DAY_OF_YEAR, 1)
@@ -681,6 +681,21 @@ class ConversationalAiEngine(
                 val list = (remRes.data as? List<*>)?.filterIsInstance<ReminderEntity>() ?: emptyList()
                 if (list.size == 1) {
                     val r = list.first()
+                    if (offsetMinutes == null) {
+                        val question = "قرار فردا «${r.title}» پیدا شد. چند دقیقه یا ساعت عقب بیندازم؟"
+                        return ConversationalResponse(
+                            replyText = question,
+                            newState = state.copy(
+                                activeIntent = ConversationIntent.UPDATE_REMINDER,
+                                targetReminderId = r.id,
+                                lastMentionedReminderId = r.id,
+                                awaitingField = AwaitingField.RESCHEDULE_OFFSET,
+                                pendingRescheduleDirection = 1,
+                                lastAssistantQuestion = question
+                            ),
+                            suggestedReplies = listOf("۱۵ دقیقه", "نیم ساعت", "یک ساعت")
+                        )
+                    }
                     val res = toolRegistry.rescheduleReminder(r.id, offsetMinutes = offsetMinutes)
                     return ConversationalResponse(
                         replyText = if (res.success) res.message else "تغییر زمان انجام نشد: ${res.message}",
@@ -701,11 +716,12 @@ class ConversationalAiEngine(
                         secondaryActionLabel = "انصراف"
                     )
                     return ConversationalResponse(
-                        replyText = "شما چند قرار برای فردا دارید. کدام مورد را مایلید دو ساعت عقب بیندازم؟",
+                        replyText = "برای فردا چند یادآور پیدا کردم. کدام مورد را می‌خواهید عقب بیندازید؟",
                         newState = state.copy(
                             activeIntent = ConversationIntent.UPDATE_REMINDER,
                             awaitingField = AwaitingField.WHICH_REMINDER_TO_SELECT,
-                            candidateReminderIds = list.map { it.id }
+                            candidateReminderIds = list.map { it.id },
+                            pendingRescheduleDirection = if (offsetMinutes == null) 1 else null
                         ),
                         actionCard = card,
                         suggestedReplies = list.mapIndexed { idx, _ -> "مورد ${when(idx){0->"اول"; 1->"دوم"; else->"سوم"}}" }
@@ -714,7 +730,7 @@ class ConversationalAiEngine(
             }
             return ConversationalResponse(
                 replyText = if (toolRegistry == null) {
-                    "سرویس یادآورها در دسترس نیست؛ قرار فردا به مدت ${offsetMinutes} دقیقه عقب نرفت و هیچ تغییری انجام نشد."
+                    "سرویس یادآورها در دسترس نیست؛ قرار فردا تغییر نکرد و هیچ تغییری انجام نشد."
                 } else {
                     "برای فردا یادآوری پیدا نکردم؛ چیزی تغییر نکرده است."
                 },
@@ -747,8 +763,24 @@ class ConversationalAiEngine(
         // 2b. Advance earlier ("نیم ساعت جلو بنداز", "یک ساعت زودترش کن")
         if (lower.contains("جلو بنداز") || lower.contains("جلو بکش") || lower.contains("زودتر کن") || lower.contains("زودترش کن")) {
             val targetId = state.lastMentionedReminderId ?: state.targetReminderId
-            val offsetMinutes = -(extractMinuteOffset(lower) ?: 30)
-            if (targetId != null && toolRegistry != null) {
+            val requestedOffset = extractMinuteOffset(lower)
+            val offsetMinutes = requestedOffset?.let { -it }
+            if (targetId != null && offsetMinutes == null) {
+                val question = "چند دقیقه یا چند ساعت زودتر تنظیم کنم؟"
+                return ConversationalResponse(
+                    replyText = question,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_REMINDER,
+                        targetReminderId = targetId,
+                        lastMentionedReminderId = targetId,
+                        awaitingField = AwaitingField.RESCHEDULE_OFFSET,
+                        pendingRescheduleDirection = -1,
+                        lastAssistantQuestion = question
+                    ),
+                    suggestedReplies = listOf("۱۵ دقیقه", "نیم ساعت", "یک ساعت")
+                )
+            }
+            if (targetId != null && toolRegistry != null && offsetMinutes != null) {
                 val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMinutes)
                 return ConversationalResponse(
                     replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
@@ -774,6 +806,20 @@ class ConversationalAiEngine(
             } else {
                 val latest = toolRegistry?.getLatestReminder()
                 if (latest != null) {
+                    if (offsetMinutes == null) {
+                        val question = "قرار «${latest.title}» انتخاب شد. چند دقیقه یا ساعت زودتر تنظیم کنم؟"
+                        return ConversationalResponse(
+                            replyText = question,
+                            newState = state.copy(
+                                targetReminderId = latest.id,
+                                lastMentionedReminderId = latest.id,
+                                awaitingField = AwaitingField.RESCHEDULE_OFFSET,
+                                pendingRescheduleDirection = -1,
+                                lastAssistantQuestion = question
+                            ),
+                            suggestedReplies = listOf("۱۵ دقیقه", "نیم ساعت", "یک ساعت")
+                        )
+                    }
                     val res = toolRegistry.rescheduleReminder(latest.id, offsetMinutes = offsetMinutes)
                     return ConversationalResponse(
                         replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
@@ -858,9 +904,30 @@ class ConversationalAiEngine(
         // 3. General Rescheduling reference ("نیم ساعت عقب بنداز", "یک ربع به تعویق بنداز", "یک ساعت بعد")
         if (lower.contains("عقب بنداز") || lower.contains("به تعویق") || lower.contains("تاخیر") || lower.contains("دیرتر")) {
             val targetId = state.lastMentionedReminderId ?: state.targetReminderId
-            val offsetMinutes = extractMinuteOffset(lower) ?: 30
+            val offsetMinutes = extractMinuteOffset(lower)
 
-            if (targetId != null && toolRegistry != null) {
+            if (targetId != null && offsetMinutes == null) {
+                val question = "چند دقیقه یا چند ساعت عقب بیندازم؟"
+                return ConversationalResponse(
+                    replyText = question,
+                    newState = state.copy(
+                        activeIntent = ConversationIntent.UPDATE_REMINDER,
+                        targetReminderId = targetId,
+                        lastMentionedReminderId = targetId,
+                        awaitingField = AwaitingField.RESCHEDULE_OFFSET,
+                        pendingRescheduleDirection = 1,
+                        lastAssistantQuestion = question
+                    ),
+                    suggestedReplies = listOf("۱۵ دقیقه", "نیم ساعت", "یک ساعت")
+                )
+            }
+            if (targetId != null && toolRegistry == null) {
+                return ConversationalResponse(
+                    replyText = "سرویس یادآورها در دسترس نیست؛ تغییر زمان انجام نشد و هیچ تغییری اعمال نشد.",
+                    newState = state.copy(awaitingField = AwaitingField.NONE, pendingRescheduleDirection = null)
+                )
+            }
+            if (targetId != null && toolRegistry != null && offsetMinutes != null) {
                 val res = toolRegistry.rescheduleReminder(targetId, offsetMinutes = offsetMinutes)
                 return ConversationalResponse(
                     replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
@@ -875,6 +942,20 @@ class ConversationalAiEngine(
             } else {
                 val latest = toolRegistry?.getLatestReminder()
                 if (latest != null) {
+                    if (offsetMinutes == null) {
+                        val question = "قرار «${latest.title}» انتخاب شد. چند دقیقه یا ساعت عقب بیندازم؟"
+                        return ConversationalResponse(
+                            replyText = question,
+                            newState = state.copy(
+                                targetReminderId = latest.id,
+                                lastMentionedReminderId = latest.id,
+                                awaitingField = AwaitingField.RESCHEDULE_OFFSET,
+                                pendingRescheduleDirection = 1,
+                                lastAssistantQuestion = question
+                            ),
+                            suggestedReplies = listOf("۱۵ دقیقه", "نیم ساعت", "یک ساعت")
+                        )
+                    }
                     val res = toolRegistry.rescheduleReminder(latest.id, offsetMinutes = offsetMinutes)
                     return ConversationalResponse(
                         replyText = if (res.success) res.message else "عملیات انجام نشد: ${res.message}",
