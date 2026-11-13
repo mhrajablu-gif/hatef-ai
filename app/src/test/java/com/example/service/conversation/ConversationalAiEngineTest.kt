@@ -542,6 +542,28 @@ class ConversationalAiEngineTest {
     }
 
     /**
+     * A natural future plan with a time and an action verb is a reminder request,
+     * even when the user does not explicitly say "یادم بنداز".
+     */
+    @Test
+    fun testImplicitColloquialTimedPlanStartsReminderFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "پس فردا ساعت سه و نیم بعد از ظهر نون بخرم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull(turn.newState.draftTask)
+        assertTrue(turn.newState.draftTask?.title?.contains("نون") == true ||
+            turn.newState.draftTask?.title?.contains("نان") == true)
+        assertTrue(turn.newState.draftTask?.hasExplicitDate == true)
+        assertTrue(turn.newState.draftTask?.hasExplicitTime == true)
+        assertTrue(turn.newState.isWaitingForAnswer())
+    }
+
+    /**
      * Calendar questions about tomorrow must be answered as information,
      * without opening reminder creation or asking for a reminder time.
      */
