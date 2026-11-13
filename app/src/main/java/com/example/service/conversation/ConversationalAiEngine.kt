@@ -1341,7 +1341,7 @@ class ConversationalAiEngine(
                 newState = state.copy(
                     activeIntent = ConversationIntent.UPDATE_APP_SETTINGS,
                     awaitingField = AwaitingField.NONE,
-                    slotStatus = SlotFillingStatus.COMPLETED
+                    slotStatus = if (toolRes?.success == true) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE
                 ),
                 executedResult = toolRes,
                 suggestedReplies = listOf("مشاهده تنظیمات", "یادآور جدید", "پوسته تاریک را فعال کن")
@@ -1361,7 +1361,7 @@ class ConversationalAiEngine(
                     newState = state.copy(
                         activeIntent = ConversationIntent.UPDATE_APP_SETTINGS,
                         awaitingField = AwaitingField.NONE,
-                        slotStatus = SlotFillingStatus.COMPLETED
+                        slotStatus = if (toolRes?.success == true) SlotFillingStatus.COMPLETED else SlotFillingStatus.IDLE
                     ),
                     executedResult = toolRes,
                     suggestedReplies = listOf("مشاهده تنظیمات", "یادآور جدید")
