@@ -2,6 +2,7 @@ package com.example.service.conversation
 
 import com.example.data.engine.PersianDateEngine
 import com.example.data.model.ReminderEntity
+import com.example.service.ai.PersianCommandAnalyzer
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -561,6 +562,21 @@ class ConversationalAiEngineTest {
         assertTrue(turn.newState.draftTask?.hasExplicitDate == true)
         assertTrue(turn.newState.draftTask?.hasExplicitTime == true)
         assertTrue(turn.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun testPersianAnalyzerParsesSpokenHalfHourAndCleansTitle() {
+        val parsed = PersianCommandAnalyzer.analyze(
+            "پس فردا ساعت سه و نیم بعد از ظهر نون بخرم",
+            fixedReferenceMillis,
+            tehranTimeZone
+        )
+
+        assertEquals(15, parsed.hour)
+        assertEquals(30, parsed.minute)
+        assertTrue(parsed.title.contains("نون"))
+        assertFalse(parsed.title.contains("بخرم"))
+        assertFalse(parsed.title.contains("پس فردا"))
     }
 
     /**
