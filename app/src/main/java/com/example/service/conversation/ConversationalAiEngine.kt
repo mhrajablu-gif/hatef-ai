@@ -1223,7 +1223,7 @@ class ConversationalAiEngine(
             val hasTitle = cleanedTitle.isNotBlank() && !isGenericSubject(cleanedTitle)
 
             if (!hasTitle) {
-                val q = "حتماً. برای چه کاری یادآوری تنظیم کنم؟"
+                val q = if (analysis.hasExplicitDate) "برای ${analysis.jalaliDateText} چه کاری رو باید یادتون بندازم؟" else "حتماً. برای چه کاری یادآوری تنظیم کنم؟"
                 val tentative = ParsedTask(
                     title = "یادآوری روزانه",
                     triggerTimestamp = startTs,
@@ -1322,7 +1322,7 @@ class ConversationalAiEngine(
             val effHour = analysis.hour ?: j.hour
             val effMin = analysis.minute ?: j.minute
             val timeStr = PersianDateEngine.formatPersianTime(effHour, effMin)
-            val q = "باشه، برای $dateStr ساعت $timeStr چه کاری رو باید یادتون بندازم؟"
+            val q = if (analysis.hasExplicitDate) "باشه، برای $dateStr ساعت $timeStr چه کاری رو باید یادتون بندازم؟" else "ساعت $timeStr مشخص است؛ چه روزی و برای چه کاری یادآوری کنم؟"
             val tentative = ParsedTask(
                 title = "یادآوری",
                 triggerTimestamp = effTs,
