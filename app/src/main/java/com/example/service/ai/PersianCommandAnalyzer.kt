@@ -38,7 +38,9 @@ data class AnalyzedCommandResult(
     val quickSuggestions: List<String>,
     val category: String = "عمومی",
     val priority: Int = 0,
-    val repeatType: String = "NONE"
+    val repeatType: String = "NONE",
+    val hasExplicitDate: Boolean = false,
+    val hasExplicitTime: Boolean = false
 )
 
 object PersianCommandAnalyzer {
@@ -83,6 +85,10 @@ object PersianCommandAnalyzer {
         }
         if (!timeExtraction.hasExplicitHour && !dateExtraction.hasExplicitDate) {
             ambiguousFields.add("MISSING_TIME_AND_DATE")
+        } else if (!dateExtraction.hasExplicitDate) {
+            ambiguousFields.add("MISSING_DATE")
+        } else if (!timeExtraction.hasExplicitHour) {
+            ambiguousFields.add("MISSING_TIME")
         }
 
         // 7. Title extraction
@@ -139,16 +145,7 @@ object PersianCommandAnalyzer {
                 }
                 targetTimestamp = cal.timeInMillis
                 reasoning.append("فاصله روز: ${dateExtraction.dayOffset} روز (${dateExtraction.matchedPhrase}). ")
-            } else if (timeExtraction.hasExplicitHour) {
-                // Time specified without date (e.g. "ساعت ۶ عصر"): if already passed today, assume tomorrow
-                if (cal.timeInMillis <= referenceTimeMillis) {
-                    cal.add(Calendar.DAY_OF_YEAR, 1)
-                    reasoning.append("ساعت انتخابی برای امروز گذشته است، لذا فردا در نظر گرفته شد. ")
-                } else {
-                    reasoning.append("زمان برای امروز ساعت $resolvedHour:$resolvedMinute تنظیم شد. ")
-                }
-                targetTimestamp = cal.timeInMillis
-            }
+
 
             if (targetTimestamp != null) {
                 calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)
@@ -168,8 +165,33 @@ object PersianCommandAnalyzer {
             }
         }
 
+        // Preserve an explicitly supplied date even when the user has not supplied a time yet.
+        if (dateExtraction.hasExplicitDate && jalaliDateText == null && !dateExtraction.isConflict) {
+            val dateOnlyTimestamp = when {
+                dateExtraction.exactJalaliYear != null && dateExtraction.exactJalaliMonth != null && dateExtraction.exactJalaliDay != null -> {
+                    val current = PersianDateEngine.timestampToJalali(referenceTimeMillis, timeZone)
+                    PersianDateEngine.jalaliToTimestamp(
+                        dateExtraction.exactJalaliYear, dateExtraction.exactJalaliMonth, dateExtraction.exactJalaliDay,
+                        current.hour, current.minute, timeZone
+                    )
+                }
+                dateExtraction.dayOffset != null -> Calendar.getInstance(timeZone).apply {
+                    timeInMillis = referenceTimeMillis
+                    add(Calendar.DAY_OF_YEAR, dateExtraction.dayOffset)
+                }.timeInMillis
+                else -> null
+            }
+            if (dateOnlyTimestamp != null) {
+                jalaliDateText = PersianDateEngine.timestampToJalali(dateOnlyTimestamp, timeZone).formatPersianNumeric()
+                calculatedWeekday = PersianDateEngine.getPersianWeekdayName(dateOnlyTimestamp, timeZone)
+            }
+        }
+
         // Formulate clarification if needed
-        val needsClarification = status == ValidationStatus.AMBIGUOUS || status == ValidationStatus.CONFLICT || title.isBlank()
+        val missingDate = !dateExtraction.hasExplicitDate
+        val missingTime = !timeExtraction.hasExplicitHour
+        val needsClarification = status == ValidationStatus.AMBIGUOUS || status == ValidationStatus.CONFLICT ||
+            title.isBlank() || missingDate || missingTime
         val clarificationQuestion = when {
             status == ValidationStatus.CONFLICT -> conflictMessage
             isHourAmbiguous -> {
@@ -177,12 +199,10 @@ object PersianCommandAnalyzer {
                 val pmHour = if (rawH < 12) rawH + 12 else rawH
                 "منظور شما از ساعت $rawH، $rawH صبح است یا $rawH عصر ($pmHour:۰۰)؟"
             }
-            !timeExtraction.hasExplicitHour && !dateExtraction.hasExplicitDate -> {
-                "ساعت یا تاریخ برای یادآوری «$title» مشخص نشده است؛ مایلید چه زمانی یادآوری شود؟"
-            }
-            title.isBlank() -> {
-                "زمان یادآوری روی ${jalaliDateText ?: "مشخص"} ساعت ${timeExtraction.resolvedHour ?: "نامشخص"} تنظیم شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
-            }
+            missingDate && missingTime -> "تاریخ و ساعت یادآوری «$title» مشخص نشده است؛ چه روز و ساعتی مدنظرتان است؟"
+            missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «$title» چه روزی باشد؟"
+            missingTime -> "تاریخ مشخص است؛ یادآوری «$title» را چه ساعتی تنظیم کنم؟"
+            title.isBlank() -> "زمان یادآوری مشخص شد؛ لطفاً عنوان یا موضوع این یادآوری را بفرمایید."
             else -> null
         }
 
@@ -192,12 +212,10 @@ object PersianCommandAnalyzer {
                 val pmHour = if (rawH < 12) rawH + 12 else rawH
                 listOf("$rawH صبح", "$rawH عصر ($pmHour:۰۰)")
             }
-            !timeExtraction.hasExplicitHour && !dateExtraction.hasExplicitDate -> {
-                listOf("نیم ساعت دیگر", "۱ ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ۹ صبح")
-            }
-            title.isBlank() -> {
-                listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
-            }
+            missingDate && missingTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+            missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+            missingTime -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+            title.isBlank() -> listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
             else -> emptyList()
         }
 
@@ -244,7 +262,9 @@ object PersianCommandAnalyzer {
             quickSuggestions = suggestions,
             category = category,
             priority = priority,
-            repeatType = repeat
+            repeatType = repeat,
+            hasExplicitDate = dateExtraction.hasExplicitDate,
+            hasExplicitTime = timeExtraction.hasExplicitHour
         )
     }
 
@@ -343,7 +363,9 @@ object PersianCommandAnalyzer {
                 reasoningExplanation = "محاسبه زمان نسبی دقیق ($matchedPhrase = +$offsetMinutes دقیقه از زمان مرجع).",
                 needsUserClarification = title.isBlank(),
                 clarificationQuestion = if (title.isBlank()) "زمان روی $matchedPhrase تنظیم شد؛ لطفاً موضوع کار را بفرمایید:" else null,
-                quickSuggestions = if (title.isBlank()) listOf("مصرف دارو", "تماس تلفنی", "بررسی کارها") else emptyList()
+                quickSuggestions = if (title.isBlank()) listOf("مصرف دارو", "تماس تلفنی", "بررسی کارها") else emptyList(),
+                hasExplicitDate = true,
+                hasExplicitTime = true
             )
         }
         return null
@@ -407,7 +429,9 @@ object PersianCommandAnalyzer {
                 reasoningExplanation = "محاسبه بر اساس ساعت دقیق فعلی با جابجایی تقویمی $dayOffset روز ($phrase).",
                 needsUserClarification = title.isBlank(),
                 clarificationQuestion = if (title.isBlank()) "زمان روی $phrase تنظیم شد؛ لطفاً موضوع کار را بفرمایید:" else null,
-                quickSuggestions = if (title.isBlank()) listOf("بررسی کارها", "جلسه هفتگی", "تماس") else emptyList()
+                quickSuggestions = if (title.isBlank()) listOf("بررسی کارها", "جلسه هفتگی", "تماس") else emptyList(),
+                hasExplicitDate = true,
+                hasExplicitTime = true
             )
         }
         return null
