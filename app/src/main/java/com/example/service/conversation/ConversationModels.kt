@@ -87,6 +87,7 @@ enum class AwaitingField {
     TITLE,
     TIME_OR_DATE,
     AMBIGUOUS_HOUR_AM_PM,
+    RESCHEDULE_OFFSET,
     WHICH_REMINDER_TO_SELECT,
     EXECUTION_CONFIRMATION
 }
@@ -104,7 +105,9 @@ data class ConversationState(
     val targetReminderId: Long? = null,
     val candidateReminderIds: List<Long> = emptyList(),
     val lastMentionedReminderId: Long? = null,
-    val turnsCount: Int = 0
+    val turnsCount: Int = 0,
+    // +1 delays the selected reminder; -1 moves it earlier while awaiting a duration.
+    val pendingRescheduleDirection: Int? = null
 ) {
     fun isWaitingForAnswer(): Boolean = awaitingField != AwaitingField.NONE
 }
