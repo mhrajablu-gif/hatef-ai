@@ -21,7 +21,7 @@ object LocalPersianParser {
             Regex(
                 """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
             )
-        ).map { it.trim().trim('،', '؛', ' ', '.') }.filter { it.isNotBlank() }
+        ).map { it.trim().removePrefix("سپس").removePrefix("بعدش").trim().trim('،', '؛', ' ', '.') }.filter { it.isNotBlank() }
 
         val tasks = mutableListOf<ParsedTask>()
         for (segment in segments) {
