@@ -40,6 +40,11 @@ jobs:
           echo "Restored stable debug keystore from repository secret."
           test -s debug.keystore
 
+      - name: Print stable signing certificate fingerprints
+        run: |
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey |
+            grep -E '^(Alias name:|SHA1:|SHA256:|MD5:)'
+
       # Gemini requires Firebase AI Logic configuration for the side-by-side package.
       # Add a Firebase Android app for com.aistudio.hatefassistant.pxkrmq.safe and store
       # its google-services.json contents in the GOOGLE_SERVICES_JSON_SAFE repository secret.
@@ -114,6 +119,7 @@ jobs:
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs "$APK"
+
       - name: Upload unit test reports
         if: always()
         uses: actions/upload-artifact@v7
