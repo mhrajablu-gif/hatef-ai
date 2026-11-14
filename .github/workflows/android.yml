@@ -40,7 +40,36 @@ jobs:
           echo "Restored stable debug keystore from repository secret."
           test -s debug.keystore
 
-      # This side-by-side build uses a new application ID and does not require Firebase config.
+      # Gemini requires Firebase AI Logic configuration for the side-by-side package.
+      # Add a Firebase Android app for com.aistudio.hatefassistant.pxkrmq.safe and store
+      # its google-services.json contents in the GOOGLE_SERVICES_JSON_SAFE repository secret.
+      - name: Restore Firebase configuration for side-by-side app
+        env:
+          GOOGLE_SERVICES_JSON_SAFE: ${{ secrets.GOOGLE_SERVICES_JSON_SAFE }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON_SAFE" ]; then
+            echo "::warning::Firebase config for the .safe package is not set. Tests will run, but APK creation is intentionally skipped."
+            echo "FIREBASE_CONFIG_READY=false" >> "$GITHUB_ENV"
+          else
+            mkdir -p app
+            printf '%s' "$GOOGLE_SERVICES_JSON_SAFE" > app/google-services.json
+            python3 - <<'PY'
+          import json, sys
+          with open("app/google-services.json", encoding="utf-8") as f:
+              data = json.load(f)
+          packages = [
+              c.get("client_info", {}).get("android_client_info", {}).get("package_name")
+              for c in data.get("client", [])
+          ]
+          expected = "com.aistudio.hatefassistant.pxkrmq.safe"
+          if expected not in packages:
+              print("::error::google-services.json has no client for the .safe application ID.")
+              sys.exit(1)
+          print("Firebase configuration matches the side-by-side application ID.")
+          PY
+            echo "FIREBASE_CONFIG_READY=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Prepare Secrets Configuration
         run: |
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
@@ -69,14 +98,17 @@ jobs:
           retention-days: 14
 
       - name: Build APK
+        if: env.FIREBASE_CONFIG_READY == 'true'
         run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
       - name: Verify APK Output
+        if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           ls -lh app/build/outputs/apk/debug/
           test -f app/build/outputs/apk/debug/app-debug.apk
 
       - name: Verify APK signature and print certificate fingerprint
+        if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
@@ -92,6 +124,7 @@ jobs:
           retention-days: 14
 
       - name: Upload APK
+        if: env.FIREBASE_CONFIG_READY == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: Yadet-APK
