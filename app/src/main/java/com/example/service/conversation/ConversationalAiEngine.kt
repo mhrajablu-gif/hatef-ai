@@ -1747,7 +1747,7 @@ class ConversationalAiEngine(
                 clean.contains("صحبت کنم") || clean.contains("حرف بزنم") ||
                 clean.contains("تماس میگیرم") || clean.contains("تماس می‌گیرم") ||
                 clean.contains("جلسه میگیرم") || clean.contains("جلسه می‌گیرم") ||
-                (clean.contains("باید") && (clean.contains("بیدار") || clean.contains("برم") || clean.contains("صحبت") || clean.contains("استراحت")))
+                (clean.contains("باید") && (clean.contains("بیدار") || clean.contains("صحبت") || clean.contains("استراحت")))
 
         // 2. Explicit Positive Imperatives for creating or configuring reminders
         val directTriggers = listOf(
