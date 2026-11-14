@@ -40,18 +40,7 @@ jobs:
           echo "Restored stable debug keystore from repository secret."
           test -s debug.keystore
 
-      - name: Restore Firebase configuration
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "::error::Missing GOOGLE_SERVICES_JSON repository secret. Add the complete app/google-services.json contents from Firebase Console."
-            exit 1
-          fi
-          printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-          python3 -c "import json; d=json.load(open('app/google-services.json')); assert any(c.get('client_info',{}).get('android_client_info',{}).get('package_name') == 'com.aistudio.hatefassistant.pxkrmq' for c in d.get('client',[])), 'Firebase config package name does not match the Android applicationId'"
-          echo "Firebase configuration restored and package name verified."
-
+      # This side-by-side build uses a new application ID and does not require Firebase config.
       - name: Prepare Secrets Configuration
         run: |
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
