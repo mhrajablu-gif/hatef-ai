@@ -787,16 +787,10 @@ object PersianDateEngine {
         }
 
         // 4. Assemble final timestamp
-        val targetHour = parsedHour ?: if (isSameHour) {
-            Calendar.getInstance().apply { timeInMillis = referenceTimeMillis }.get(Calendar.HOUR_OF_DAY)
-        } else {
-            15 // Default 15:00 (3 PM) for standard daily reminders if unspecified
-        }
-        val targetMinute = if (isSameHour && parsedHour == null) {
-            Calendar.getInstance().apply { timeInMillis = referenceTimeMillis }.get(Calendar.MINUTE)
-        } else {
-            parsedMinute
-        }
+        val referenceCalendar = Calendar.getInstance().apply { timeInMillis = referenceTimeMillis }
+        // Missing clock fields are placeholders only; callers must check hasExplicitTime before saving.
+        val targetHour = parsedHour ?: referenceCalendar.get(Calendar.HOUR_OF_DAY)
+        val targetMinute = if (parsedHour == null) referenceCalendar.get(Calendar.MINUTE) else parsedMinute
 
         val targetTimestamp: Long = when {
             exactJalaliYear != null && exactJalaliMonth != null && exactJalaliDay != null -> {
@@ -811,14 +805,10 @@ object PersianDateEngine {
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }
-                // If today and time already passed, move to tomorrow
-                if (dayOffset == 0 && cal.timeInMillis <= referenceTimeMillis && !clean.contains("امروز")) {
-                    cal.add(Calendar.DAY_OF_YEAR, 1)
-                }
                 cal.timeInMillis
             }
             hasExplicitTime -> {
-                // Time specified without date (e.g. "ساعت ۳"): check if passed today
+                // Keep today's date as a placeholder; hasExplicitDate remains false.
                 val cal = Calendar.getInstance().apply {
                     timeInMillis = referenceTimeMillis
                     set(Calendar.HOUR_OF_DAY, targetHour)
@@ -826,15 +816,9 @@ object PersianDateEngine {
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }
-                if (cal.timeInMillis <= referenceTimeMillis) {
-                    cal.add(Calendar.DAY_OF_YEAR, 1) // Roll to tomorrow
-                }
                 cal.timeInMillis
             }
-            else -> {
-                // Default: 1 hour from now
-                referenceTimeMillis + 60 * 60 * 1000L
-            }
+            else -> referenceTimeMillis
         }
 
         val finalJalali = timestampToJalali(targetTimestamp)

@@ -5,6 +5,7 @@ import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 
 /**
@@ -16,11 +17,11 @@ import kotlinx.coroutines.withTimeout
 class GeneralConversationalAiService {
     private val TAG = "GeneralAiService"
 
-    private val model by lazy {
+    private fun createModel(userContextSummary: String?) =
         Firebase.ai.generativeModel(
-            modelName = "gemini-3.8-flash"
+            modelName = "gemini-3.8-flash",
+            systemInstruction = content { text(buildSystemPrompt(userContextSummary)) }
         )
-    }
 
     /**
      * Answers general inquiries, brainstorms ideas, explains concepts, offers logical advice,
@@ -46,27 +47,70 @@ class GeneralConversationalAiService {
                 return withTimeout(20_000L) {
                     executeOnlineTurn(trimmed, recentHistory, userContextSummary)
                 }
+            } catch (e: TimeoutCancellationException) {
+                // A request timeout is a recoverable service failure, not cancellation of the parent UI.
+                lastException = e
+                Log.w(TAG, "Gemini request timed out after 20 seconds; returning a controlled fallback.")
+                break
             } catch (e: CancellationException) {
-                // Cooperative coroutine cancellation must NEVER be swallowed
+                // Preserve cancellation initiated by the caller or lifecycle.
                 throw e
             } catch (e: Exception) {
                 lastException = e
-                Log.w(TAG, "Gemini turn attempt $attempts failed: ${e.message}")
+                Log.w(TAG, "Gemini turn attempt $attempts failed. type=${e.javaClass.simpleName}")
                 if (attempts < maxAttempts) {
                     kotlinx.coroutines.delay(1000L)
                 }
             }
         }
 
-        // When network/API is unreachable (e.g. offline mode or test environment), check for domain knowledge fallback
-        Log.e(TAG, "Online Gemini AI communication failed: ${lastException?.message}", lastException)
+        // Keep diagnostics useful without exposing request contents, credentials, or App Check tokens.
+        val failure = lastException
+        val failureType = failure?.javaClass?.simpleName ?: "UnknownException"
+        Log.e(TAG, "Online Gemini request failed. type=$failureType", failure)
+
+        // Local canned knowledge must never look like a successful Gemini response.
         val offlineFallback = checkDirectAdvisoryOrRoutine(trimmed) ?: getOfflineKnowledgeReply(trimmed)
+        val diagnosticDetails = safeDiagnosticDetails(failure)
+        val diagnosticNotice = buildString {
+            append("\n\n")
+            append("توجه: اتصال Gemini برقرار نشد؛ ")
+            append("پاسخ بالا از بخش آفلاین برنامه است. ")
+            append("کد تشخیص: ")
+            append(failureType)
+            if (failure is TimeoutCancellationException) append(" (TIMEOUT)")
+            if (!diagnosticDetails.isNullOrBlank()) {
+                append("\nجزئیات فنی: ")
+                append(diagnosticDetails)
+            }
+        }
         if (offlineFallback != null) {
-            return offlineFallback
+            return offlineFallback + diagnosticNotice
         }
 
-        // Honest error reporting when no response could be generated; never mask as fake Gemini reply
-        return "متأسفانه در حال حاضر امکان برقراری ارتباط با دستیار هوشمند وجود ندارد. لطفاً اتصال اینترنت خود را بررسی کرده و مجدداً تلاش فرمایید."
+        // Honest error reporting when no response could be generated; never mask as fake Gemini reply.
+        return "متأسفانه در حال حاضر امکان برقراری ارتباط با Gemini وجود ندارد. لطفاً بعداً دوباره تلاش کنید." + diagnosticNotice
+    }
+
+    /**
+     * Exposes a short, sanitized server diagnostic so failures can be distinguished
+     * (for example App Check rejection, invalid API key, disabled API, or quota).
+     * Never include request headers, tokens, or full stack traces in chat UI.
+     */
+    private fun safeDiagnosticDetails(error: Throwable?): String? {
+        if (error == null) return null
+        val raw = generateSequence(error) { it.cause }
+            .take(3)
+            .mapNotNull { it.message?.trim()?.takeIf(String::isNotBlank) }
+            .distinct()
+            .joinToString(" | ")
+        if (raw.isBlank()) return null
+
+        return raw
+            .replace(Regex("(?i)AIza[0-9A-Za-z_-]{20,}"), "[کلید مخفی حذف شد]")
+            .replace(Regex("(?i)Bearer\\s+[A-Za-z0-9._~-]+"), "Bearer [توکن حذف شد]")
+            .replace(Regex("[\\r\\n\\t]+"), " ")
+            .take(360)
     }
 
     private suspend fun executeOnlineTurn(
@@ -74,7 +118,9 @@ class GeneralConversationalAiService {
         recentHistory: List<ChatMessage>,
         userContextSummary: String?
     ): String {
-        val systemPrompt = buildSystemPrompt(userContextSummary)
+        // System behavior and user context belong in the model's systemInstruction,
+        // not in the user/model conversation history.
+        val model = createModel(userContextSummary)
 
         // 1. Filter out the current user message from prior history so it is not sent twice
         val priorHistory = if (recentHistory.isNotEmpty() &&
@@ -87,24 +133,29 @@ class GeneralConversationalAiService {
         }
 
         // 2. Build properly alternating conversation turns for startChat
+        // Keep only complete, correctly ordered user/model pairs. In particular, never
+        // invent a model reply to carry the system prompt as conversation history.
         val historyContentList = mutableListOf<com.google.firebase.ai.type.Content>()
-        historyContentList.add(content("user") { text(systemPrompt) })
-        historyContentList.add(content("model") { text("متوجه شدم. من «یادت»، دستیار هوشمند، دانا و همراه شما به زبان فارسی هستم.") })
-
-        // Extract clean alternating turns from prior history (up to last 8 messages)
-        val cleanPrior = priorHistory.takeLast(8)
-        var expectedSender = MessageSender.USER
-        for (msg in cleanPrior) {
-            if (msg.sender == expectedSender && msg.text.isNotBlank()) {
-                val role = if (msg.sender == MessageSender.USER) "user" else "model"
-                historyContentList.add(content(role) { text(msg.text.trim()) })
-                expectedSender = if (expectedSender == MessageSender.USER) MessageSender.ASSISTANT else MessageSender.USER
-            }
+        val cleanPrior = priorHistory.takeLast(20).toMutableList()
+        while (cleanPrior.isNotEmpty() && cleanPrior.first().sender != MessageSender.USER) {
+            cleanPrior.removeAt(0)
         }
 
-        // Ensure history ends on a 'model' turn so the subsequent sendMessage creates a valid user->model turn
-        if (historyContentList.isNotEmpty() && historyContentList.last().role == "user") {
-            historyContentList.removeAt(historyContentList.lastIndex)
+        var index = 0
+        while (index + 1 < cleanPrior.size) {
+            val userMessage = cleanPrior[index]
+            val assistantMessage = cleanPrior[index + 1]
+            if (userMessage.sender == MessageSender.USER &&
+                assistantMessage.sender == MessageSender.ASSISTANT &&
+                userMessage.text.isNotBlank() &&
+                assistantMessage.text.isNotBlank()
+            ) {
+                historyContentList.add(content("user") { text(userMessage.text.trim()) })
+                historyContentList.add(content("model") { text(assistantMessage.text.trim()) })
+                index += 2
+            } else {
+                index += 1
+            }
         }
 
         val chat = model.startChat(history = historyContentList)
@@ -168,7 +219,15 @@ class GeneralConversationalAiService {
      * Local offline Persian conversational and knowledge fallback covering
      * technology, science, productivity, health, psychology, and general reasoning.
      */
-    fun getOfflineKnowledgeReply(input: String): String {
+    fun getOfflineKnowledgeReply(input: String): String? {
+        val normalized = input.trim().lowercase()
+        if (normalized.startsWith("سلام") || normalized.startsWith("درود") ||
+            normalized.contains("صبح بخیر") || normalized.contains("عصر بخیر") ||
+            normalized.contains("شب بخیر") || normalized.contains("حالت چطوره") ||
+            normalized.contains("خوبی") || normalized.contains("چطوری")
+        ) {
+            return "سلام! ممنون که پرسیدی. من آماده‌ام باهات گفتگو کنم یا در انجام کارهات کمکت کنم."
+        }
         val direct = checkDirectAdvisoryOrRoutine(input)
         if (direct != null) return direct
 
@@ -233,8 +292,7 @@ class GeneralConversationalAiService {
             lower.contains("کی هستی") || lower.contains("چه کارهایی بلدی") || lower.contains("راهنما") ->
                 "من «یادت» هستم؛ دستیار هوشمند شما با قابلیت‌های جامع:\n۱. پاسخ به پرسش‌های عمومی، علمی، فناوری، برنامه‌ریزی و ایده‌پردازی به زبان فارسی.\n۲. مدیریت هوشمند تمام قرارها و یادآورها: ثبت، حذف تک‌تک یا همگی («همه رو حذف کن»)، جابجایی («ساعت رو بکن ۱۰»)، و جلو/عقب انداختن.\n۳. تغییر تنظیمات برنامه با فرمان صوتی یا متنی («تم رو تاریک کن»، «پیش‌اعلان رو بکن ۳۰ دقیقه»).\n۴. حافظه بلندمدت برای به خاطر سپردن عادات و ساعات خواب و بیداری شما."
 
-            else ->
-                "من سوال یا دیدگاه شما را بررسی کردم. در تمام زمینه‌های برنامه‌ریزی، مدیریت یادآورها، دانش عمومی، علوم و فناوری در خدمت شما هستم. اگر مایلید جزئیات بیشتری درباره موضوع بفرمایید، با کمال میل با شما گفتگو و راهنمایی خواهم کرد."
+            else -> null
         }
     }
 }

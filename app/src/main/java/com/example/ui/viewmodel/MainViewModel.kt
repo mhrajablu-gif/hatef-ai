@@ -9,6 +9,7 @@ import com.example.data.model.ReminderEntity
 import com.example.data.repository.ReminderRepository
 import com.example.data.repository.TaskStats
 import com.example.service.ai.GeminiSemanticParser
+import com.example.service.ai.LocalPersianParser
 import com.example.service.ai.ParsedTask
 import com.example.service.alarm.AlarmScheduler
 import com.example.service.speech.SpeechManager
@@ -96,7 +97,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (state is VoiceState.Success && state.recognizedText.isNotBlank()) {
                     val recognized = state.recognizedText
                     speechManager.resetState()
-                    if (_uiState.value.isVoiceSheetOpen) {
+                    if (_uiState.value.currentTab == NavTab.ASSISTANT || _uiState.value.isVoiceSheetOpen) {
+                        // Assistant-tab speech must enter the same visible chat pipeline as typed input.
                         sendChatMessage(recognized)
                     } else if (_uiState.value.activeClarification != null) {
                         provideClarification(recognized)
@@ -231,7 +233,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun sendChatMessage(text: String) {
         val clean = text.trim()
-        if (clean.isBlank()) return
+        if (clean.isBlank() || _uiState.value.isAiParsing) return
 
         val userMsg = com.example.service.conversation.ChatMessage(
             sender = com.example.service.conversation.MessageSender.USER,
@@ -242,31 +244,90 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
-            val response = conversationalEngine.processTurn(
-                userInput = clean,
-                currentState = _conversationState.value,
-                recentHistory = updatedHistory
-            )
+            try {
+                // Multi-reminder messages use the same deterministic offline parser for typed
+                // and recognized speech. Only intercept when every extracted item has an
+                // explicit title, date, and time; ambiguous or partial input stays in the
+                // existing conversational slot-filling flow.
+                if (!_conversationState.value.isWaitingForAnswer()) {
+                    val multiTasks = LocalPersianParser.parse(clean)
+                    val isCompleteMultiReminder = multiTasks.size > 1 && multiTasks.all { task ->
+                        task.hasExplicitTitle && task.hasExplicitDate && task.hasExplicitTime &&
+                            !task.isAmbiguous && !task.needsClarification
+                    }
+                    if (isCompleteMultiReminder) {
+                        val previewMessages = buildList {
+                            add(
+                                com.example.service.conversation.ChatMessage(
+                                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                                    text = "چند یادآور مستقل تشخیص دادم. هر مورد را جداگانه بررسی و تأیید کنید؛ تا پیش از تأیید شما هیچ‌کدام ذخیره نمی‌شوند."
+                                )
+                            )
+                            multiTasks.forEachIndexed { index, task ->
+                                add(
+                                    com.example.service.conversation.ChatMessage(
+                                        sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                                        text = "پیش‌نمایش یادآور ${index + 1} از ${multiTasks.size}",
+                                        actionCard = com.example.service.conversation.ConversationActionCard(
+                                            type = com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER,
+                                            task = task
+                                        )
+                                    )
+                                )
+                            }
+                        }
+                        _chatMessages.value = _chatMessages.value + previewMessages
+                        ttsSpeaker.speak("چند یادآور جداگانه شناسایی کردم. لطفاً هرکدام را بررسی و تأیید کنید.")
+                        return@launch
+                    }
+                }
 
-            _conversationState.value = response.newState
+                // Outer guard covers the complete intent-processing turn, not only the Gemini call.
+                val response = kotlinx.coroutines.withTimeout(22_000L) {
+                    conversationalEngine.processTurn(
+                        userInput = clean,
+                        currentState = _conversationState.value,
+                        recentHistory = updatedHistory
+                    )
+                }
 
-            val assistantMsg = com.example.service.conversation.ChatMessage(
-                sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                text = response.replyText,
-                actionCard = response.actionCard,
-                suggestedReplies = response.suggestedReplies
-            )
-
-            _chatMessages.value = _chatMessages.value + assistantMsg
-            _uiState.value = _uiState.value.copy(isAiParsing = false)
-
-            // Speak response via TTS
-            ttsSpeaker.speak(response.replyText)
-
-            if (response.executedResult != null && response.executedResult.success) {
-                _uiState.value = _uiState.value.copy(
-                    infoMessage = response.executedResult.message
+                _conversationState.value = response.newState
+                val assistantMsg = com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = response.replyText,
+                    actionCard = response.actionCard,
+                    suggestedReplies = response.suggestedReplies
                 )
+                _chatMessages.value = _chatMessages.value + assistantMsg
+                ttsSpeaker.speak(response.replyText)
+
+                if (response.executedResult != null && response.executedResult.success) {
+                    _uiState.value = _uiState.value.copy(
+                        infoMessage = response.executedResult.message
+                    )
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                android.util.Log.e("MainViewModel", "Chat turn timed out", e)
+                _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = "پاسخ‌گویی در زمان تعیین‌شده انجام نشد. لطفاً دوباره تلاش کنید؛ اگر تکرار شد، اتصال یا سرویس هوش مصنوعی را بررسی می‌کنیم."
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Chat turn failed", e)
+                val errorMessage = when {
+                    e is kotlinx.coroutines.TimeoutCancellationException ->
+                        "پاسخ‌گویی بیش از حد طول کشید و درخواست متوقف شد. لطفاً دوباره تلاش کنید."
+                    else ->
+                        "در پردازش پیام مشکلی پیش آمد. لطفاً دوباره تلاش کنید."
+                }
+                _chatMessages.value = _chatMessages.value + com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = errorMessage
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(isAiParsing = false)
             }
         }
     }
@@ -283,27 +344,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     card.task?.let { task ->
                         val result = toolRegistry.createReminder(task)
                         val confirmReply = if (result.success) {
-                            "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} با موفقیت تنظیم شد."
+                            result.message
                         } else {
                             "خطا در ایجاد یادآور: ${result.message}"
                         }
                         val entity = result.data as? ReminderEntity
                         val resultCard = card.copy(
-                            type = com.example.service.conversation.ActionCardType.EXECUTION_RESULT,
+                            type = if (result.success) {
+                                com.example.service.conversation.ActionCardType.EXECUTION_RESULT
+                            } else {
+                                com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER
+                            },
                             targetReminder = entity,
+                            primaryActionLabel = if (result.success) "انجام شد" else "تلاش دوباره",
+                            secondaryActionLabel = "لغو",
                             statusMessage = confirmReply
                         )
                         _conversationState.value = _conversationState.value.copy(
-                            slotStatus = com.example.service.conversation.SlotFillingStatus.COMPLETED,
-                            awaitingField = com.example.service.conversation.AwaitingField.NONE,
-                            draftTask = null,
-                            lastMentionedReminderId = entity?.id
+                            slotStatus = if (result.success) {
+                                com.example.service.conversation.SlotFillingStatus.COMPLETED
+                            } else {
+                                com.example.service.conversation.SlotFillingStatus.AWAITING_CONFIRMATION
+                            },
+                            awaitingField = if (result.success) {
+                                com.example.service.conversation.AwaitingField.NONE
+                            } else {
+                                com.example.service.conversation.AwaitingField.EXECUTION_CONFIRMATION
+                            },
+                            draftTask = if (result.success) null else task,
+                            lastMentionedReminderId = if (result.success) entity?.id else _conversationState.value.lastMentionedReminderId
                         )
                         val assistantMsg = com.example.service.conversation.ChatMessage(
                             sender = com.example.service.conversation.MessageSender.ASSISTANT,
                             text = confirmReply,
                             actionCard = resultCard,
-                            suggestedReplies = listOf("یادآور جدید", "مشاهده یادآورها")
+                            suggestedReplies = if (result.success) listOf("یادآور جدید", "مشاهده یادآورها") else listOf("آره، دوباره ثبت کن", "لغو")
                         )
                         _chatMessages.value = _chatMessages.value + assistantMsg
                         ttsSpeaker.speak(confirmReply)
@@ -377,33 +452,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun parseSpokenCommand(text: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true, activeClarification = null)
-            val parsedList = aiParser.parseCommand(text)
+            try {
+                val parsedList = aiParser.parseCommand(text)
 
             // Check if clarification is needed on any extracted task
             val taskNeedingClarification = parsedList.firstOrNull { it.needsClarification }
             if (taskNeedingClarification != null) {
-                val clarificationType = if (!taskNeedingClarification.hasExplicitTime && !taskNeedingClarification.hasExplicitDate) {
+                val missingDate = !taskNeedingClarification.hasExplicitDate &&
+                    !taskNeedingClarification.hasResolvedRelativeDateTime
+                val missingTime = !taskNeedingClarification.hasExplicitTime ||
+                    taskNeedingClarification.hasAmbiguousTimePeriod
+                val clarificationType = if (missingDate || missingTime) {
                     ClarificationType.MISSING_TIME_OR_DATE
                 } else {
                     ClarificationType.MISSING_TITLE
                 }
 
-                val question = if (clarificationType == ClarificationType.MISSING_TIME_OR_DATE) {
-                    "ساعت یا تاریخ برای یادآوری «${taskNeedingClarification.title}» مشخص نشده است؛ مایلید چه زمانی یادآوری شود؟"
-                } else {
-                    "زمان یادآوری روی ${taskNeedingClarification.jalaliDateText} ساعت ${taskNeedingClarification.timeText} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
+                val ambiguousHour = taskNeedingClarification.timeText.substringBefore(":")
+                val question = when {
+                    taskNeedingClarification.hasAmbiguousTimePeriod ->
+                        "منظورتان ساعت $ambiguousHour صبح است یا شب؟"
+                    missingDate && missingTime -> "تاریخ و ساعت یادآوری «${taskNeedingClarification.title}» مشخص نشده است؛ چه روز و ساعتی مدنظرتان است؟"
+                    missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «${taskNeedingClarification.title}» چه روزی باشد؟"
+                    missingTime -> "تاریخ مشخص است؛ یادآوری «${taskNeedingClarification.title}» را چه ساعتی تنظیم کنم؟"
+                    else -> "لطفاً عنوان یا موضوع این یادآوری را بفرمایید."
                 }
 
-                val suggestions = if (clarificationType == ClarificationType.MISSING_TIME_OR_DATE) {
-                    listOf("نیم ساعت دیگر", "۱ ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ۹ صبح", "پس‌فردا ساعت ۱۵:۰۰")
-                } else {
-                    listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
+                val suggestions = when {
+                    taskNeedingClarification.hasAmbiguousTimePeriod ->
+                        listOf("ساعت $ambiguousHour صبح", "ساعت $ambiguousHour شب")
+                    missingDate && missingTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+                    missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+                    missingTime -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+                    else -> listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
                 }
 
+                val clarificationTask = if (taskNeedingClarification.hasAmbiguousTimePeriod) {
+                    taskNeedingClarification.copy(
+                        hasExplicitTime = false,
+                        isAmbiguous = false,
+                        clarificationQuestion = null,
+                        analyzedResult = null
+                    )
+                } else {
+                    taskNeedingClarification
+                }
                 val prompt = ClarificationPrompt(
                     type = clarificationType,
                     question = question,
-                    tentativeTask = taskNeedingClarification,
+                    tentativeTask = clarificationTask,
                     quickSuggestions = suggestions
                 )
 
@@ -419,6 +516,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     parsedTasksPreview = parsedList,
                     activeClarification = null
                 )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainViewModel", "Voice command parsing failed", e)
+                _uiState.value = _uiState.value.copy(
+                    activeClarification = null,
+                    infoMessage = "در تحلیل فرمان صوتی مشکلی پیش آمد. لطفاً دوباره تلاش کنید."
+                )
+            } finally {
+                _uiState.value = _uiState.value.copy(isAiParsing = false)
             }
         }
     }
@@ -432,24 +540,96 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val updatedTask: ParsedTask = when (prompt.type) {
             ClarificationType.MISSING_TIME_OR_DATE -> {
                 val extracted = PersianDateEngine.extractPersianTask(cleanResponse)
-                val newTimestamp = if (extracted.hasExplicitTime || extracted.hasExplicitDate) {
-                    extracted.triggerTimestamp
-                } else {
-                    System.currentTimeMillis() + 3600 * 1000L
+                val responseAnalysis = com.example.service.ai.PersianCommandAnalyzer.analyze(cleanResponse)
+                if (responseAnalysis.validationStatus == com.example.service.ai.ValidationStatus.CONFLICT) {
+                    val conflictPrompt = responseAnalysis.clarificationQuestion ?: "تاریخ‌های گفته‌شده با هم سازگار نیستند؛ لطفاً تاریخ را روشن کنید."
+                    _uiState.value = _uiState.value.copy(
+                        activeClarification = prompt.copy(question = conflictPrompt, quickSuggestions = responseAnalysis.quickSuggestions),
+                        infoMessage = conflictPrompt
+                    )
+                    ttsSpeaker.speak(conflictPrompt)
+                    return
                 }
-                val j = PersianDateEngine.timestampToJalali(newTimestamp)
-                val timeStr = PersianDateEngine.formatPersianTime(j.hour, j.minute)
-                val dateStr = j.formatPersianNumeric()
+                val responseAmbiguousTime =
+                    responseAnalysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
+                val resolvedRelativeDateTime = responseAnalysis.hasExplicitDate && responseAnalysis.hasExplicitTime && responseAnalysis.targetTimestamp != null
+                val extractedHasDate = extracted.hasExplicitDate || responseAnalysis.hasExplicitDate || resolvedRelativeDateTime
+                val hasDate = tentative.hasExplicitDate || extractedHasDate
+                val responseHasTime = extracted.hasExplicitTime || responseAnalysis.hasExplicitTime || resolvedRelativeDateTime
+                val hasTime = tentative.hasExplicitTime || (responseHasTime && !responseAmbiguousTime)
 
-                tentative.copy(
-                    triggerTimestamp = newTimestamp,
-                    jalaliDateText = dateStr,
-                    timeText = timeStr,
-                    hasExplicitTime = true,
-                    hasExplicitDate = true,
+                val mergedCalendar = Calendar.getInstance().apply {
+                    timeInMillis = tentative.triggerTimestamp
+                }
+                val answerCalendar = Calendar.getInstance().apply {
+                    timeInMillis = responseAnalysis.targetTimestamp ?: extracted.triggerTimestamp
+                }
+                if (extractedHasDate) {
+                    mergedCalendar.set(Calendar.YEAR, answerCalendar.get(Calendar.YEAR))
+                    mergedCalendar.set(Calendar.MONTH, answerCalendar.get(Calendar.MONTH))
+                    mergedCalendar.set(Calendar.DAY_OF_MONTH, answerCalendar.get(Calendar.DAY_OF_MONTH))
+                }
+                if (responseHasTime && !responseAmbiguousTime) {
+                    mergedCalendar.set(Calendar.HOUR_OF_DAY, responseAnalysis.hour ?: answerCalendar.get(Calendar.HOUR_OF_DAY))
+                    mergedCalendar.set(Calendar.MINUTE, responseAnalysis.minute ?: answerCalendar.get(Calendar.MINUTE))
+                    mergedCalendar.set(Calendar.SECOND, 0)
+                    mergedCalendar.set(Calendar.MILLISECOND, 0)
+                }
+
+                val mergedTimestamp = mergedCalendar.timeInMillis
+                val j = PersianDateEngine.timestampToJalali(mergedTimestamp)
+                val mergedTask = tentative.copy(
+                    triggerTimestamp = mergedTimestamp,
+                    jalaliDateText = j.formatPersianNumeric(),
+                    timeText = PersianDateEngine.formatPersianTime(j.hour, j.minute),
+                    hasExplicitTime = hasTime,
+                    hasExplicitDate = hasDate,
                     clarificationQuestion = null,
-                    isAmbiguous = false
+                    isAmbiguous = false,
+                    analyzedResult = null
                 )
+
+                if (responseAmbiguousTime || !hasDate || !hasTime) {
+                    val ambiguousHour = extracted.timeText.substringBefore(":")
+                    val followUp = when {
+                        responseAmbiguousTime -> "منظورتان ساعت $ambiguousHour صبح است یا شب؟"
+                        !hasDate && !hasTime -> "هنوز تاریخ و ساعت مشخص نشده است؛ لطفاً هر دو را بگویید، مثلاً «فردا ساعت ۹ صبح»."
+                        !hasDate -> "ساعت ثبت شد؛ تاریخ یادآوری چه روزی باشد؟"
+                        else -> "تاریخ ثبت شد؛ یادآوری را چه ساعتی تنظیم کنم؟"
+                    }
+                    val suggestions = when {
+                        responseAmbiguousTime -> listOf("ساعت $ambiguousHour صبح", "ساعت $ambiguousHour شب")
+                        !hasDate && !hasTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+                        !hasDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+                        else -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        activeClarification = prompt.copy(
+                            question = followUp,
+                            tentativeTask = mergedTask,
+                            quickSuggestions = suggestions
+                        ),
+                        infoMessage = followUp
+                    )
+                    ttsSpeaker.speak(followUp)
+                    return
+                }
+
+                if (!mergedTask.hasExplicitTitle) {
+                    val titlePrompt = "زمان یادآوری مشخص شد؛ لطفاً عنوان یا موضوع آن را بفرمایید:"
+                    _uiState.value = _uiState.value.copy(
+                        activeClarification = ClarificationPrompt(
+                            type = ClarificationType.MISSING_TITLE,
+                            question = titlePrompt,
+                            tentativeTask = mergedTask,
+                            quickSuggestions = listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
+                        ),
+                        infoMessage = titlePrompt
+                    )
+                    ttsSpeaker.speak(titlePrompt)
+                    return
+                }
+                mergedTask
             }
             ClarificationType.MISSING_TITLE -> {
                 val cleanTitle = PersianDateEngine.extractPersianTask(cleanResponse).title
@@ -475,15 +655,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissClarification() {
         val prompt = _uiState.value.activeClarification ?: return
-        val current = _uiState.value.parsedTasksPreview.toMutableList()
-        current.add(0, prompt.tentativeTask)
         _uiState.value = _uiState.value.copy(
             activeClarification = null,
-            parsedTasksPreview = current
+            infoMessage = "یادآور «${prompt.tentativeTask.title}» به‌دلیل ناقص بودن اطلاعات ثبت نشد."
         )
     }
 
+    private fun alarmScheduleMessage(
+        result: com.example.service.alarm.AlarmScheduleResult,
+        title: String
+    ): String? = when (result) {
+        com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> null
+        com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED ->
+            "یادآور «$title» ذخیره شد، اما پیش‌اعلان آن تنظیم نشد."
+        com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE ->
+            "یادآور «$title» ذخیره شد، اما زمان انتخاب‌شده گذشته است؛ تاریخ و ساعت را اصلاح کن."
+        com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED ->
+            "یادآور «$title» ذخیره شد، اما زنگ آن تنظیم نشد. مجوز «هشدار دقیق» را از تنظیمات برنامه فعال کن."
+        com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+        com.example.service.alarm.AlarmScheduleResult.FAILED ->
+            "یادآور «$title» ذخیره شد، اما زمان‌بندی زنگ ناموفق بود. تنظیمات مجوز هشدار را بررسی کن."
+    }
+
+    private fun buildClarificationPrompt(task: ParsedTask): ClarificationPrompt {
+        val isAmbiguous = task.isAmbiguous || task.hasAmbiguousTimePeriod
+        val missingDate = !task.hasExplicitDate && !task.hasResolvedRelativeDateTime
+        val missingTime = !task.hasExplicitTime || isAmbiguous
+        val type = if (missingDate || missingTime) ClarificationType.MISSING_TIME_OR_DATE else ClarificationType.MISSING_TITLE
+        val hour = task.timeText.substringBefore(":")
+        val question = when {
+            isAmbiguous -> "منظورتان ساعت $hour صبح است یا شب؟"
+            missingDate && missingTime -> "تاریخ و ساعت یادآوری «${task.title}» مشخص نشده است؛ چه روز و ساعتی مدنظرتان است؟"
+            missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «${task.title}» چه روزی باشد؟"
+            missingTime -> "تاریخ مشخص است؛ یادآوری «${task.title}» را چه ساعتی تنظیم کنم؟"
+            else -> "لطفاً عنوان یا موضوع این یادآوری را بفرمایید."
+        }
+        val suggestions = when {
+            isAmbiguous -> listOf("ساعت $hour صبح", "ساعت $hour شب")
+            missingDate && missingTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+            missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+            missingTime -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+            else -> listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
+        }
+        return ClarificationPrompt(type, question, task, suggestions)
+    }
+
     fun confirmPreviewTask(task: ParsedTask) {
+        if (!task.hasExplicitTitle || !task.hasExplicitDate || !task.hasExplicitTime || task.isAmbiguous || task.hasAmbiguousTimePeriod) {
+            val prompt = buildClarificationPrompt(task)
+            _uiState.value = _uiState.value.copy(
+                activeClarification = prompt,
+                parsedTasksPreview = _uiState.value.parsedTasksPreview.filter { it != task },
+                infoMessage = "این یادآوری هنوز اطلاعات کامل ندارد و ذخیره نشد."
+            )
+            return
+        }
         viewModelScope.launch {
             val context = getApplication<Application>()
             val entity = ReminderEntity(
@@ -495,6 +721,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 category = task.category,
                 priority = task.priority,
                 repeatType = task.repeatType,
+                recurrenceEndDate = task.recurrenceEndDate,
+                recurrenceDaysOfWeek = task.recurrenceDaysOfWeek,
                 advanceAlertMinutes = task.advanceAlertMinutes
             )
 
@@ -507,13 +735,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val id = repository.insert(entity)
-            AlarmScheduler.scheduleReminder(context, entity.copy(id = id))
+            val scheduleMessage = alarmScheduleMessage(AlarmScheduler.scheduleReminder(context, entity.copy(id = id)), entity.title)
 
             // Remove confirmed from preview
             val updated = _uiState.value.parsedTasksPreview.filter { it != task }
             _uiState.value = _uiState.value.copy(
                 parsedTasksPreview = updated,
-                infoMessage = "یادآوری «${entity.title}» با موفقیت ثبت شد."
+                infoMessage = scheduleMessage ?: "یادآوری «${entity.title}» با موفقیت ثبت شد."
             )
             if (updated.isEmpty()) {
                 _uiState.value = _uiState.value.copy(isVoiceSheetOpen = false)
@@ -523,7 +751,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun confirmAllPreviewTasks() {
         viewModelScope.launch {
+            val incompleteTask = _uiState.value.parsedTasksPreview.firstOrNull {
+                !it.hasExplicitTitle || !it.hasExplicitDate || !it.hasExplicitTime || it.isAmbiguous || it.hasAmbiguousTimePeriod
+            }
+            if (incompleteTask != null) {
+                _uiState.value = _uiState.value.copy(
+                    activeClarification = buildClarificationPrompt(incompleteTask),
+                    parsedTasksPreview = _uiState.value.parsedTasksPreview.filter { it != incompleteTask },
+                    infoMessage = "یکی از یادآوری‌ها ناقص است؛ ابتدا اطلاعات آن را کامل کنیم. هیچ یادآوری ناقصی ذخیره نشد."
+                )
+                return@launch
+            }
             val context = getApplication<Application>()
+            val scheduleWarnings = mutableListOf<String>()
             for (task in _uiState.value.parsedTasksPreview) {
                 val entity = ReminderEntity(
                     title = task.title,
@@ -534,15 +774,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     category = task.category,
                     priority = task.priority,
                     repeatType = task.repeatType,
+                    recurrenceEndDate = task.recurrenceEndDate,
+                    recurrenceDaysOfWeek = task.recurrenceDaysOfWeek,
                     advanceAlertMinutes = task.advanceAlertMinutes
                 )
                 val id = repository.insert(entity)
-                AlarmScheduler.scheduleReminder(context, entity.copy(id = id))
+                val scheduleMessage = alarmScheduleMessage(AlarmScheduler.scheduleReminder(context, entity.copy(id = id)), entity.title)
+                if (scheduleMessage != null) scheduleWarnings += scheduleMessage
             }
             _uiState.value = _uiState.value.copy(
                 parsedTasksPreview = emptyList(),
                 isVoiceSheetOpen = false,
-                infoMessage = "تمام یادآوری‌ها با موفقیت ثبت شدند."
+                infoMessage = if (scheduleWarnings.isEmpty()) "تمام یادآوری‌ها با موفقیت ثبت شدند." else scheduleWarnings.joinToString("\n")
             )
         }
     }
@@ -563,13 +806,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val context = getApplication<Application>()
             if (reminder.id == 0L) {
                 val id = repository.insert(reminder)
-                AlarmScheduler.scheduleReminder(context, reminder.copy(id = id))
-                _uiState.value = _uiState.value.copy(infoMessage = "یادآوری جدید ثبت شد.")
+                val scheduleMessage = alarmScheduleMessage(AlarmScheduler.scheduleReminder(context, reminder.copy(id = id)), reminder.title)
+                _uiState.value = _uiState.value.copy(infoMessage = scheduleMessage ?: "یادآوری جدید ثبت شد.")
             } else {
                 repository.update(reminder)
-                AlarmScheduler.cancelReminder(context, reminder.id)
-                AlarmScheduler.scheduleReminder(context, reminder)
-                _uiState.value = _uiState.value.copy(infoMessage = "تغییرات ذخیره شد.")
+                val scheduleMessage = alarmScheduleMessage(AlarmScheduler.scheduleReminder(context, reminder), reminder.title)
+                _uiState.value = _uiState.value.copy(infoMessage = scheduleMessage ?: "تغییرات ذخیره شد.")
             }
             com.example.widget.TodayTasksWidgetReceiver.updateAllWidgets(context)
             closeAddDialog()
@@ -584,7 +826,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (newStatus) {
                 AlarmScheduler.cancelReminder(context, reminder.id)
             } else {
-                AlarmScheduler.scheduleReminder(context, reminder.copy(isCompleted = false))
+                val scheduleMessage = alarmScheduleMessage(
+                    AlarmScheduler.scheduleReminder(context, reminder.copy(isCompleted = false)), reminder.title
+                )
+                if (scheduleMessage != null) _uiState.value = _uiState.value.copy(infoMessage = scheduleMessage)
             }
             com.example.widget.TodayTasksWidgetReceiver.updateAllWidgets(context)
         }
@@ -614,9 +859,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isCompleted = false
             )
             repository.update(updated)
-            AlarmScheduler.scheduleReminder(context, updated)
+            val scheduleMessage = alarmScheduleMessage(AlarmScheduler.scheduleReminder(context, updated), updated.title)
             com.example.widget.TodayTasksWidgetReceiver.updateAllWidgets(context)
-            _uiState.value = _uiState.value.copy(infoMessage = "یادآوری به ${addedMinutes} دقیقه بعد موکول شد.")
+            _uiState.value = _uiState.value.copy(infoMessage = scheduleMessage ?: "یادآوری به ${addedMinutes} دقیقه بعد موکول شد.")
         }
     }
 
