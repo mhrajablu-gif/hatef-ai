@@ -73,6 +73,10 @@ object PersianCommandAnalyzer {
 
         // 4. Extract Clock Time (Hour & Minute)
         val timeExtraction = extractClockTime(normalizedEnglish)
+        // A daily recurrence supplies its own date rule. For the first occurrence,
+        // schedule the next future instance of the requested clock time.
+        val isDailyRecurrence = (clean.contains("هر روز") || clean.contains("روزانه")) &&
+            !clean.contains("هر روز کاری") && !clean.contains("روزهای کاری")
 
         // 5. Extract Date / Weekday
         val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone)
@@ -160,6 +164,24 @@ object PersianCommandAnalyzer {
             }
         }
 
+        // Daily recurrence does not need a separately stated calendar date.
+        // Use the next future occurrence as the initial alarm timestamp.
+        if (targetTimestamp == null && isDailyRecurrence && timeExtraction.hasExplicitHour &&
+            !isHourAmbiguous && !dateExtraction.isConflict) {
+            val nextOccurrence = Calendar.getInstance(timeZone).apply {
+                timeInMillis = referenceTimeMillis
+                set(Calendar.HOUR_OF_DAY, timeExtraction.resolvedHour ?: timeExtraction.rawHour)
+                set(Calendar.MINUTE, timeExtraction.resolvedMinute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+                if (timeInMillis <= referenceTimeMillis) add(Calendar.DAY_OF_YEAR, 1)
+            }
+            targetTimestamp = nextOccurrence.timeInMillis
+            calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp!!, timeZone)
+            jalaliDateText = PersianDateEngine.timestampToJalali(targetTimestamp!!, timeZone).formatPersianNumeric()
+            reasoning.append("تکرار روزانه تشخیص داده شد؛ نخستین نوبت آینده محاسبه شد. ")
+        }
+
         // Preserve an explicitly supplied date even when the user has not supplied a time yet.
         if (dateExtraction.hasExplicitDate && jalaliDateText == null && !dateExtraction.isConflict) {
             val dateOnlyTimestamp = when {
@@ -183,7 +205,7 @@ object PersianCommandAnalyzer {
         }
 
         // Formulate clarification if needed
-        val missingDate = !dateExtraction.hasExplicitDate
+        val missingDate = !dateExtraction.hasExplicitDate && !isDailyRecurrence
         val missingTime = !timeExtraction.hasExplicitHour
         val needsClarification = status == ValidationStatus.AMBIGUOUS || status == ValidationStatus.CONFLICT ||
             title.isBlank() || missingDate || missingTime
