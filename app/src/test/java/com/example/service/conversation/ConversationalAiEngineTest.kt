@@ -687,6 +687,19 @@ class ConversationalAiEngineTest {
     }
 
     @Test
+    fun declarativeFuturePlanDoesNotCreateReminderWithoutExplicitIntent() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "فردا می‌خواهم مطالعه کنم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertTrue("اعلام برنامه شخصی نباید به‌عنوان درخواست یادآور تفسیر شود",
+            turn.newState.activeIntent != ConversationIntent.CREATE_REMINDER)
+        assertNull("نباید پیش‌نویس یادآور ساخته شود", turn.newState.draftTask)
+    }
+
+    @Test
     fun recurringTimedTaskWithoutReminderPhraseEntersReminderFlow() = runBlocking {
         val turn = engine.processTurn(
             userInput = "هر روز ساعت ۱۰ صبح ورزش کنم",
