@@ -9,6 +9,7 @@ import com.example.data.model.ReminderEntity
 import com.example.data.repository.ReminderRepository
 import com.example.data.repository.TaskStats
 import com.example.service.ai.GeminiSemanticParser
+import com.example.service.ai.LocalPersianParser
 import com.example.service.ai.ParsedTask
 import com.example.service.alarm.AlarmScheduler
 import com.example.service.speech.SpeechManager
@@ -244,6 +245,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
             try {
+                // Multi-reminder messages use the same deterministic offline parser for typed
+                // and recognized speech. Only intercept when every extracted item has an
+                // explicit title, date, and time; ambiguous or partial input stays in the
+                // existing conversational slot-filling flow.
+                if (!_conversationState.value.isWaitingForAnswer()) {
+                    val multiTasks = LocalPersianParser.parse(clean)
+                    val isCompleteMultiReminder = multiTasks.size > 1 && multiTasks.all { task ->
+                        task.hasExplicitTitle && task.hasExplicitDate && task.hasExplicitTime &&
+                            !task.isAmbiguous && !task.needsClarification
+                    }
+                    if (isCompleteMultiReminder) {
+                        val previewMessages = buildList {
+                            add(
+                                com.example.service.conversation.ChatMessage(
+                                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                                    text = "چند یادآور مستقل تشخیص دادم. هر مورد را جداگانه بررسی و تأیید کنید؛ تا پیش از تأیید شما هیچ‌کدام ذخیره نمی‌شوند."
+                                )
+                            )
+                            multiTasks.forEachIndexed { index, task ->
+                                add(
+                                    com.example.service.conversation.ChatMessage(
+                                        sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                                        text = "پیش‌نمایش یادآور ${index + 1} از ${multiTasks.size}",
+                                        actionCard = com.example.service.conversation.ConversationActionCard(
+                                            type = com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER,
+                                            task = task
+                                        )
+                                    )
+                                )
+                            }
+                        }
+                        _chatMessages.value = _chatMessages.value + previewMessages
+                        ttsSpeaker.speak("چند یادآور جداگانه شناسایی کردم. لطفاً هرکدام را بررسی و تأیید کنید.")
+                        return@launch
+                    }
+                }
+
                 // Outer guard covers the complete intent-processing turn, not only the Gemini call.
                 val response = kotlinx.coroutines.withTimeout(22_000L) {
                     conversationalEngine.processTurn(
