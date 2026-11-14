@@ -40,10 +40,16 @@ jobs:
           echo "Restored stable debug keystore from repository secret."
           test -s debug.keystore
 
-      - name: Print stable signing certificate fingerprints
+      - name: Print and retain stable signing certificate fingerprint
         run: |
-          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey |
-            grep -E '^(Alias name:|SHA1:|SHA256:|MD5:)'
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | tee /tmp/yadet-signing-certificate.txt
+          KEYSTORE_CERT_SHA256="$(sed -nE 's/^[[:space:]]*SHA256:[[:space:]]*//p' /tmp/yadet-signing-certificate.txt | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          if [ -z "$KEYSTORE_CERT_SHA256" ]; then
+            echo "::error::Could not read SHA-256 fingerprint from the stable keystore."
+            exit 1
+          fi
+          echo "Stable keystore SHA-256: $KEYSTORE_CERT_SHA256"
+          echo "KEYSTORE_CERT_SHA256=$KEYSTORE_CERT_SHA256" >> "$GITHUB_ENV"
 
       # Gemini requires Firebase AI Logic configuration for the side-by-side package.
       # Add a Firebase Android app for com.aistudio.hatefassistant.pxkrmq.safe and store
@@ -112,13 +118,37 @@ jobs:
           ls -lh app/build/outputs/apk/debug/
           test -f app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Verify APK signature and print certificate fingerprint
+      - name: Verify APK package, version, and stable signing certificate
         if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
-          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          APKSIGNER="$BUILD_TOOLS/apksigner"
+          AAPT="$BUILD_TOOLS/aapt"
           test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          test -x "$AAPT"
+
+          BADGING="$("$AAPT" dump badging "$APK")"
+          printf '%s\n' "$BADGING" | head -n 1
+          PACKAGE_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package: name='([^']+)'.*/\\1/p")"
+          VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionCode='([^']+)'.*/\\1/p")"
+          VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionName='([^']+)'.*/\\1/p")"
+          test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq.safe"
+          test "$VERSION_CODE" = "24"
+          test "$VERSION_NAME" = "1.18.5"
+
+          VERIFY_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
+          printf '%s\n' "$VERIFY_OUTPUT"
+          APK_CERT_SHA256="$(printf '%s\n' "$VERIFY_OUTPUT" | sed -nE 's/^[[:space:]]*Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)$/\\1/p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+          if [ -z "$APK_CERT_SHA256" ] || [ -z "$KEYSTORE_CERT_SHA256" ]; then
+            echo "::error::Could not read both APK and keystore signing fingerprints."
+            exit 1
+          fi
+          if [ "$APK_CERT_SHA256" != "$KEYSTORE_CERT_SHA256" ]; then
+            echo "::error::APK signing certificate does not match the stable keystore. Refusing to upload an un-updatable APK."
+            exit 1
+          fi
+          echo "APK package/version and signing certificate match the established update baseline."
 
       - name: Upload unit test reports
         if: always()
