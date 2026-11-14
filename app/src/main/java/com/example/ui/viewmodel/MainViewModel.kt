@@ -96,7 +96,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (state is VoiceState.Success && state.recognizedText.isNotBlank()) {
                     val recognized = state.recognizedText
                     speechManager.resetState()
-                    if (_uiState.value.isVoiceSheetOpen) {
+                    if (_uiState.value.currentTab == NavTab.ASSISTANT || _uiState.value.isVoiceSheetOpen) {
+                        // Assistant-tab speech must enter the same visible conversation pipeline as typed input.
                         sendChatMessage(recognized)
                     } else if (_uiState.value.activeClarification != null) {
                         provideClarification(recognized)
