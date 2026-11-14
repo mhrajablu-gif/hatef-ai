@@ -54,6 +54,7 @@ import com.example.ui.theme.TealAccent
 import com.example.ui.theme.TealPrimary
 import com.example.ui.viewmodel.MainViewModel
 import java.util.Calendar
+import java.util.Locale
 
 @Composable
 fun CalendarScreen(
@@ -199,7 +200,7 @@ fun CalendarScreen(
                                     val isFriday = col == 6
 
                                     // Check if there are tasks on this day
-                                    val dateStr = String.format("%04d/%02d/%02d", viewingYear, viewingMonth, dayNum)
+                                    val dateStr = String.format(Locale.ROOT, "%04d/%02d/%02d", viewingYear, viewingMonth, dayNum)
                                     val hasTasks = allReminders.any {
                                         PersianDateEngine.toEnglishDigits(it.jalaliDateText) == dateStr
                                     }

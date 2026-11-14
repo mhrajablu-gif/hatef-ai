@@ -56,6 +56,9 @@ fun AddEditReminderDialog(
     var selectedHour by remember { mutableIntStateOf(currentJalali.hour) }
     var selectedMinute by remember { mutableIntStateOf(currentJalali.minute) }
 
+    // Keep a rolling year range while always including the year of an edited reminder.
+    val yearRange = (minOf(currentJalali.year - 10, selectedYear)..maxOf(currentJalali.year + 20, selectedYear)).toList()
+
     var category by remember { mutableStateOf(initialReminder?.category ?: "عمومی") }
     var priority by remember { mutableIntStateOf(initialReminder?.priority ?: 0) }
     var repeatType by remember { mutableStateOf(initialReminder?.repeatType ?: "NONE") }
@@ -141,17 +144,23 @@ fun AddEditReminderDialog(
                         label = "روز"
                     )
 
-                    // Month Wheel (Farvardin..Esfand)
+                    // Month Wheel (Farvardin..Esfand); clamp the day when month length changes.
                     com.example.ui.components.MonthWheelDrawerPicker(
                         selectedMonth = selectedMonth,
-                        onMonthChange = { selectedMonth = it }
+                        onMonthChange = { month ->
+                            selectedMonth = month
+                            selectedDay = selectedDay.coerceIn(1, PersianDateEngine.getDaysInMonth(selectedYear, month))
+                        }
                     )
 
-                    // Year Wheel (1403..1407)
+                    // Year Wheel (rolling range, including the current/edited year).
                     com.example.ui.components.WheelDrawerPicker(
                         value = selectedYear,
-                        range = listOf(1403, 1404, 1405, 1406, 1407),
-                        onValueChange = { selectedYear = it },
+                        range = yearRange,
+                        onValueChange = { year ->
+                            selectedYear = year
+                            selectedDay = selectedDay.coerceIn(1, PersianDateEngine.getDaysInMonth(year, selectedMonth))
+                        },
                         label = "سال",
                         formatItem = { PersianDateEngine.toPersianDigits(it) }
                     )
@@ -172,12 +181,12 @@ fun AddEditReminderDialog(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Hour Wheel (0..23)
+                    // Minute Wheel (0..59) — placed first so it appears on the right in RTL.
                     com.example.ui.components.WheelDrawerPicker(
-                        value = selectedHour,
-                        range = (0..23).toList(),
-                        onValueChange = { selectedHour = it },
-                        label = "ساعت"
+                        value = selectedMinute,
+                        range = (0..59).toList(),
+                        onValueChange = { selectedMinute = it },
+                        label = "دقیقه"
                     )
 
                     Text(
@@ -188,12 +197,12 @@ fun AddEditReminderDialog(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 20.dp)
                     )
 
-                    // Minute Wheel (0..59)
+                    // Hour Wheel (0..23) — appears on the left in RTL.
                     com.example.ui.components.WheelDrawerPicker(
-                        value = selectedMinute,
-                        range = (0..59).toList(),
-                        onValueChange = { selectedMinute = it },
-                        label = "دقیقه"
+                        value = selectedHour,
+                        range = (0..23).toList(),
+                        onValueChange = { selectedHour = it },
+                        label = "ساعت"
                     )
                 }
 

@@ -21,7 +21,10 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "hatef_reminder_database"
-                ).fallbackToDestructiveMigration(dropAllTables = true).build()
+                )
+                    // Never silently erase user reminders when a schema version changes.
+                    // Add an explicit Room Migration before incrementing the database version.
+                    .build()
                 INSTANCE = instance
                 instance
             }

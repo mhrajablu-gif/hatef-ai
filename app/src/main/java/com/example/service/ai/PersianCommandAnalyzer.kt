@@ -38,7 +38,9 @@ data class AnalyzedCommandResult(
     val quickSuggestions: List<String>,
     val category: String = "عمومی",
     val priority: Int = 0,
-    val repeatType: String = "NONE"
+    val repeatType: String = "NONE",
+    val hasExplicitDate: Boolean = false,
+    val hasExplicitTime: Boolean = false
 )
 
 object PersianCommandAnalyzer {
@@ -71,6 +73,10 @@ object PersianCommandAnalyzer {
 
         // 4. Extract Clock Time (Hour & Minute)
         val timeExtraction = extractClockTime(normalizedEnglish)
+        // A daily recurrence supplies its own date rule. For the first occurrence,
+        // schedule the next future instance of the requested clock time.
+        val isDailyRecurrence = (clean.contains("هر روز") || clean.contains("روزانه")) &&
+            !clean.contains("هر روز کاری") && !clean.contains("روزهای کاری")
 
         // 5. Extract Date / Weekday
         val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone)
@@ -83,6 +89,10 @@ object PersianCommandAnalyzer {
         }
         if (!timeExtraction.hasExplicitHour && !dateExtraction.hasExplicitDate) {
             ambiguousFields.add("MISSING_TIME_AND_DATE")
+        } else if (!dateExtraction.hasExplicitDate) {
+            ambiguousFields.add("MISSING_DATE")
+        } else if (!timeExtraction.hasExplicitHour) {
+            ambiguousFields.add("MISSING_TIME")
         }
 
         // 7. Title extraction
@@ -132,22 +142,8 @@ object PersianCommandAnalyzer {
                 reasoning.append("تاریخ صوتی شمسی ${dateExtraction.exactJalaliYear}/${dateExtraction.exactJalaliMonth}/${dateExtraction.exactJalaliDay} استخراج شد. ")
             } else if (dateExtraction.dayOffset != null) {
                 cal.add(Calendar.DAY_OF_YEAR, dateExtraction.dayOffset)
-                // If today and time has already passed without explicit "امروز"
-                if (dateExtraction.dayOffset == 0 && cal.timeInMillis <= referenceTimeMillis && !clean.contains("امروز")) {
-                    cal.add(Calendar.DAY_OF_YEAR, 1)
-                    reasoning.append("ساعت مشخص‌شده برای امروز سپری شده، به فردا منتقل شد. ")
-                }
                 targetTimestamp = cal.timeInMillis
                 reasoning.append("فاصله روز: ${dateExtraction.dayOffset} روز (${dateExtraction.matchedPhrase}). ")
-            } else if (timeExtraction.hasExplicitHour) {
-                // Time specified without date (e.g. "ساعت ۶ عصر"): if already passed today, assume tomorrow
-                if (cal.timeInMillis <= referenceTimeMillis) {
-                    cal.add(Calendar.DAY_OF_YEAR, 1)
-                    reasoning.append("ساعت انتخابی برای امروز گذشته است، لذا فردا در نظر گرفته شد. ")
-                } else {
-                    reasoning.append("زمان برای امروز ساعت $resolvedHour:$resolvedMinute تنظیم شد. ")
-                }
-                targetTimestamp = cal.timeInMillis
             }
 
             if (targetTimestamp != null) {
@@ -168,8 +164,51 @@ object PersianCommandAnalyzer {
             }
         }
 
+        // Daily recurrence does not need a separately stated calendar date.
+        // Use the next future occurrence as the initial alarm timestamp.
+        if (targetTimestamp == null && isDailyRecurrence && timeExtraction.hasExplicitHour &&
+            !isHourAmbiguous && !dateExtraction.isConflict) {
+            val nextOccurrence = Calendar.getInstance(timeZone).apply {
+                timeInMillis = referenceTimeMillis
+                set(Calendar.HOUR_OF_DAY, timeExtraction.resolvedHour ?: timeExtraction.rawHour)
+                set(Calendar.MINUTE, timeExtraction.resolvedMinute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+                if (timeInMillis <= referenceTimeMillis) add(Calendar.DAY_OF_YEAR, 1)
+            }
+            targetTimestamp = nextOccurrence.timeInMillis
+            calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp!!, timeZone)
+            jalaliDateText = PersianDateEngine.timestampToJalali(targetTimestamp!!, timeZone).formatPersianNumeric()
+            reasoning.append("تکرار روزانه تشخیص داده شد؛ نخستین نوبت آینده محاسبه شد. ")
+        }
+
+        // Preserve an explicitly supplied date even when the user has not supplied a time yet.
+        if (dateExtraction.hasExplicitDate && jalaliDateText == null && !dateExtraction.isConflict) {
+            val dateOnlyTimestamp = when {
+                dateExtraction.exactJalaliYear != null && dateExtraction.exactJalaliMonth != null && dateExtraction.exactJalaliDay != null -> {
+                    val current = PersianDateEngine.timestampToJalali(referenceTimeMillis, timeZone)
+                    PersianDateEngine.jalaliToTimestamp(
+                        dateExtraction.exactJalaliYear, dateExtraction.exactJalaliMonth, dateExtraction.exactJalaliDay,
+                        current.hour, current.minute, timeZone
+                    )
+                }
+                dateExtraction.dayOffset != null -> Calendar.getInstance(timeZone).apply {
+                    timeInMillis = referenceTimeMillis
+                    add(Calendar.DAY_OF_YEAR, dateExtraction.dayOffset)
+                }.timeInMillis
+                else -> null
+            }
+            if (dateOnlyTimestamp != null) {
+                jalaliDateText = PersianDateEngine.timestampToJalali(dateOnlyTimestamp, timeZone).formatPersianNumeric()
+                calculatedWeekday = PersianDateEngine.getPersianWeekdayName(dateOnlyTimestamp, timeZone)
+            }
+        }
+
         // Formulate clarification if needed
-        val needsClarification = status == ValidationStatus.AMBIGUOUS || status == ValidationStatus.CONFLICT || title.isBlank()
+        val missingDate = !dateExtraction.hasExplicitDate && !isDailyRecurrence
+        val missingTime = !timeExtraction.hasExplicitHour
+        val needsClarification = status == ValidationStatus.AMBIGUOUS || status == ValidationStatus.CONFLICT ||
+            title.isBlank() || missingDate || missingTime
         val clarificationQuestion = when {
             status == ValidationStatus.CONFLICT -> conflictMessage
             isHourAmbiguous -> {
@@ -177,12 +216,10 @@ object PersianCommandAnalyzer {
                 val pmHour = if (rawH < 12) rawH + 12 else rawH
                 "منظور شما از ساعت $rawH، $rawH صبح است یا $rawH عصر ($pmHour:۰۰)؟"
             }
-            !timeExtraction.hasExplicitHour && !dateExtraction.hasExplicitDate -> {
-                "ساعت یا تاریخ برای یادآوری «$title» مشخص نشده است؛ مایلید چه زمانی یادآوری شود؟"
-            }
-            title.isBlank() -> {
-                "زمان یادآوری روی ${jalaliDateText ?: "مشخص"} ساعت ${timeExtraction.resolvedHour ?: "نامشخص"} تنظیم شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
-            }
+            missingDate && missingTime -> "تاریخ و ساعت یادآوری «$title» مشخص نشده است؛ چه روز و ساعتی مدنظرتان است؟"
+            missingDate -> "ساعت مشخص است؛ تاریخ یادآوری «$title» چه روزی باشد؟"
+            missingTime -> "تاریخ مشخص است؛ یادآوری «$title» را چه ساعتی تنظیم کنم؟"
+            title.isBlank() -> "زمان یادآوری مشخص شد؛ لطفاً عنوان یا موضوع این یادآوری را بفرمایید."
             else -> null
         }
 
@@ -192,12 +229,10 @@ object PersianCommandAnalyzer {
                 val pmHour = if (rawH < 12) rawH + 12 else rawH
                 listOf("$rawH صبح", "$rawH عصر ($pmHour:۰۰)")
             }
-            !timeExtraction.hasExplicitHour && !dateExtraction.hasExplicitDate -> {
-                listOf("نیم ساعت دیگر", "۱ ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ۹ صبح")
-            }
-            title.isBlank() -> {
-                listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
-            }
+            missingDate && missingTime -> listOf("نیم ساعت دیگر", "امروز ساعت ۱۸:۰۰", "فردا ساعت ۹ صبح")
+            missingDate -> listOf("امروز", "فردا", "پس‌فردا", "سه روز دیگر")
+            missingTime -> listOf("ساعت ۹ صبح", "ساعت ۱۸:۰۰", "نیم ساعت دیگر")
+            title.isBlank() -> listOf("جلسه کاری", "تماس تلفنی", "خرید", "مصرف دارو")
             else -> emptyList()
         }
 
@@ -209,9 +244,12 @@ object PersianCommandAnalyzer {
         }
 
         val repeat = when {
+            clean.contains("هر روز کاری") || clean.contains("روزهای کاری") -> "WORKDAYS"
             clean.contains("هر روز") || clean.contains("روزانه") -> "DAILY"
-            clean.contains("هر هفته") || clean.contains("هفتگی") || clean.contains("هر جمعه") -> "WEEKLY"
+            clean.contains("هر هفته") || clean.contains("هفتگی") ||
+                listOf("هر شنبه", "هر یکشنبه", "هر دوشنبه", "هر سه‌شنبه", "هر چهارشنبه", "هر پنجشنبه", "هر جمعه").any { clean.contains(it) } -> "WEEKLY"
             clean.contains("هر ماه") || clean.contains("ماهانه") -> "MONTHLY"
+            clean.contains("هر سال") || clean.contains("سالانه") -> "YEARLY"
             else -> "NONE"
         }
 
@@ -244,7 +282,9 @@ object PersianCommandAnalyzer {
             quickSuggestions = suggestions,
             category = category,
             priority = priority,
-            repeatType = repeat
+            repeatType = repeat,
+            hasExplicitDate = dateExtraction.hasExplicitDate,
+            hasExplicitTime = timeExtraction.hasExplicitHour
         )
     }
 
@@ -343,7 +383,9 @@ object PersianCommandAnalyzer {
                 reasoningExplanation = "محاسبه زمان نسبی دقیق ($matchedPhrase = +$offsetMinutes دقیقه از زمان مرجع).",
                 needsUserClarification = title.isBlank(),
                 clarificationQuestion = if (title.isBlank()) "زمان روی $matchedPhrase تنظیم شد؛ لطفاً موضوع کار را بفرمایید:" else null,
-                quickSuggestions = if (title.isBlank()) listOf("مصرف دارو", "تماس تلفنی", "بررسی کارها") else emptyList()
+                quickSuggestions = if (title.isBlank()) listOf("مصرف دارو", "تماس تلفنی", "بررسی کارها") else emptyList(),
+                hasExplicitDate = true,
+                hasExplicitTime = true
             )
         }
         return null
@@ -407,7 +449,9 @@ object PersianCommandAnalyzer {
                 reasoningExplanation = "محاسبه بر اساس ساعت دقیق فعلی با جابجایی تقویمی $dayOffset روز ($phrase).",
                 needsUserClarification = title.isBlank(),
                 clarificationQuestion = if (title.isBlank()) "زمان روی $phrase تنظیم شد؛ لطفاً موضوع کار را بفرمایید:" else null,
-                quickSuggestions = if (title.isBlank()) listOf("بررسی کارها", "جلسه هفتگی", "تماس") else emptyList()
+                quickSuggestions = if (title.isBlank()) listOf("بررسی کارها", "جلسه هفتگی", "تماس") else emptyList(),
+                hasExplicitDate = true,
+                hasExplicitTime = true
             )
         }
         return null
@@ -425,9 +469,33 @@ object PersianCommandAnalyzer {
     )
 
     private fun extractClockTime(clean: String): ExtractedClock {
+        // Speech-to-text sometimes removes the colon from HH:mm and emits "ساعت ۱۸۳۵ دقیقه".
+        // Accept compact HHmm only after the explicit word "ساعت" and validate both parts.
+        val compactTimeRegex = Regex("""ساعت\s*(\d{4})(?:\s*دقیقه)?(?!\d)""")
+        val compactMatch = compactTimeRegex.find(clean)
+        if (compactMatch != null) {
+            val digits = compactMatch.groupValues[1]
+            val compactHour = digits.substring(0, 2).toIntOrNull()
+            val compactMinute = digits.substring(2, 4).toIntOrNull()
+            if (compactHour != null && compactHour in 0..23 &&
+                compactMinute != null && compactMinute in 0..59
+            ) {
+                return ExtractedClock(
+                    rawHour = compactHour,
+                    rawMinute = compactMinute,
+                    period = if (compactHour >= 12) "عصر" else null,
+                    isPeriodSpecified = compactHour >= 12,
+                    resolvedHour = compactHour,
+                    resolvedMinute = compactMinute,
+                    hasExplicitHour = true,
+                    matchedPhrase = compactMatch.value
+                )
+            }
+        }
+
         // Matches expressions like:
         // ساعت 6:30 عصر / ساعت 6 عصر / ساعت 6 و نیم عصر / ساعت 18:30 / 6 صبح / 7 عصر / ساعت 6
-        val clockRegex = Regex("""(?:ساعت\s*)?(\d{1,2})(?::(\d{1,2}))?(?:\s*و\s*(نیم|ربع|15|30))?\s*(صبح|بامداد|ظهر|عصر|غروب|شب|بعدازظهر)?""")
+        val clockRegex = Regex("""(?:ساعت\s*)?(\d{1,2})(?:[:：∶﹕٫](\d{1,2})(?:\s*دقیقه)?)?(?:\s*و\s*(نیم|ربع|15|30))?\s*(صبح|بامداد|ظهر|عصر|غروب|شب|بعدازظهر)?(?!\s*روز)""")
         val match = clockRegex.find(clean)
 
         if (match != null && match.groupValues[1].isNotBlank()) {
@@ -548,25 +616,40 @@ object PersianCommandAnalyzer {
         var reqWeekday: String? = null
         var phrase = ""
 
-        // 1. "پس اون فردا" / "3 روز دیگر"
-        if (clean.contains("پس اون فردا") || clean.contains("پس‌اون‌فردا") || clean.contains("3 روز دیگر") || clean.contains("3 روز دیگه")) {
+        // A question such as «امروز چند شنبه است؟» asks for information; it is
+        // not a reminder date plus the weekday «شنبه». Do not extract either
+        // «امروز» or the trailing «شنبه» as scheduling constraints.
+        val isWeekdayQuestion = Regex("""(?:امروز\s*)?چند\s*شنبه""").containsMatchIn(clean)
+
+        // Relative calendar days: support digits and spoken Persian numbers
+        // e.g. "3 روز دیگه", "سه روز بعد", "بیست و سه روز دیگر".
+        val relativeDaysPattern = Regex(
+            """(?:^|[^\p{L}\p{N}])((?:\d{1,3}|یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده|بیست|سی|چهل|پنجاه|شصت|هفتاد|هشتاد|نود|صد)(?:\s*و\s*(?:یک|یه|دو|سه|چهار|پنج|شش|شیش|هفت|هشت|نه|ده|یازده|دوازده|سیزده|چهارده|پانزده|پونزده|شانزده|شونزده|هفده|هجده|نوزده))?)\s*روز\s*(دیگه|بعد|دیگر)(?=$|[^\p{L}\p{N}])"""
+        )
+        val relativeDaysMatch = relativeDaysPattern.find(clean)
+        val spokenDayOffset = relativeDaysMatch?.let {
+            parsePersianNumber(it.groupValues[1])
+        }?.takeIf { it in 1..365 }
+
+        if (relativeDaysMatch != null && spokenDayOffset != null) {
+            dayOffset = spokenDayOffset
+            phrase = relativeDaysMatch.value.trim()
+        } else if (clean.contains("پس اون فردا") || clean.contains("پس‌اون‌فردا")) {
             dayOffset = 3
-            phrase = "پس اون فردا"
-        }
-        // 2. "پس فردا" / "پس‌فردا" / "پسفردا" / "2 روز دیگر"
-        else if (clean.contains("پس فردا") || clean.contains("پس‌فردا") || clean.contains("پسفردا") || clean.contains("2 روز دیگر") || clean.contains("2 روز دیگه")) {
+            phrase = if (clean.contains("پس‌اون‌فردا")) "پس‌اون‌فردا" else "پس اون فردا"
+        } else if (clean.contains("پس فردا") || clean.contains("پس‌فردا") || clean.contains("پسفردا")) {
             dayOffset = 2
-            phrase = "پس‌فردا"
-        }
-        // 3. "فردا" / "1 روز دیگر"
-        else if (clean.contains("فردا") || clean.contains("1 روز دیگر") || clean.contains("1 روز دیگه")) {
+            phrase = when {
+                clean.contains("پس‌فردا") -> "پس‌فردا"
+                clean.contains("پسفردا") -> "پسفردا"
+                else -> "پس فردا"
+            }
+        } else if (clean.contains("فردا")) {
             dayOffset = 1
             phrase = "فردا"
-        }
-        // 4. "امروز" / "امشب"
-        else if (clean.contains("امروز") || clean.contains("امشب")) {
+        } else if (!isWeekdayQuestion && (clean.contains("امروز") || clean.contains("امشب"))) {
             dayOffset = 0
-            phrase = "امروز"
+            phrase = if (clean.contains("امشب")) "امشب" else "امروز"
         }
 
         // 5. Weekdays matching ordered by length descending to prevent "شنبه" matching inside compound words
@@ -583,7 +666,7 @@ object PersianCommandAnalyzer {
         )
 
         for (w in orderedWeekdays) {
-            if (clean.contains(w)) {
+            if (!isWeekdayQuestion && clean.contains(w)) {
                 val canonicalWd = normalizeWeekday(w)
                 reqWeekday = canonicalWd
 
@@ -661,6 +744,29 @@ object PersianCommandAnalyzer {
         )
     }
 
+    private fun parsePersianNumber(raw: String): Int? {
+        val normalized = PersianDateEngine.toEnglishDigits(raw).trim()
+        normalized.toIntOrNull()?.let { return it }
+
+        val values = mapOf(
+            "یک" to 1, "یه" to 1, "دو" to 2, "سه" to 3, "چهار" to 4,
+            "پنج" to 5, "شش" to 6, "شیش" to 6, "هفت" to 7, "هشت" to 8,
+            "نه" to 9, "ده" to 10, "یازده" to 11, "دوازده" to 12,
+            "سیزده" to 13, "چهارده" to 14, "پانزده" to 15, "پونزده" to 15,
+            "شانزده" to 16, "شونزده" to 16, "هفده" to 17, "هجده" to 18,
+            "نوزده" to 19, "بیست" to 20, "سی" to 30, "چهل" to 40,
+            "پنجاه" to 50, "شصت" to 60, "هفتاد" to 70, "هشتاد" to 80,
+            "نود" to 90, "صد" to 100
+        )
+        val parts = normalized.split(Regex("""\s*و\s*""")).filter { it.isNotBlank() }
+        if (parts.isEmpty()) return null
+        var total = 0
+        for (part in parts) {
+            total += values[part] ?: return null
+        }
+        return total
+    }
+
     private fun normalizeWeekday(weekday: String): String {
         return when (weekday.trim()) {
             "سه‌شنبه", "سه شنبه", "سه_شنبه" -> "سه‌شنبه"
@@ -714,8 +820,8 @@ object PersianCommandAnalyzer {
             t = t.replace(PersianDateEngine.toEnglishDigits(matchedTime), " ")
         }
 
-        // Remove conversational time words and weekdays
-        t = t.replace(Regex("""(?:امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
+        // Remove date, recurrence and weekday words so they never pollute the reminder title.
+        t = t.replace(Regex("""(?:هر\s*روز|روزانه|هر\s*هفته|هفتگی|هر\s*ماه|ماهانه|هر\s*سال|سالانه|هر\s+جمعه|امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
         t = t.replace(Regex("""(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
         t = t.replace(Regex("""ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{1,2})?\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)?"""), " ")
         t = t.replace(Regex("""[\d۰-۹]{1,2}\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)"""), " ")

@@ -285,4 +285,140 @@ class PersianCommandAnalyzerTest {
         assertEquals(19, result3.hour)
         assertEquals(30, result3.minute)
     }
+
+    @Test
+    fun testCase15_SpokenPersianRelativeDaysAndCleanTitle() {
+        val input = "برای سه روز دیگه نون بخرم ساعت ۱۰"
+        val result = PersianCommandAnalyzer.analyze(input, baseTime, tehranTimeZone)
+
+        val expected = Calendar.getInstance(tehranTimeZone).apply {
+            timeInMillis = baseTime
+            add(Calendar.DAY_OF_YEAR, 3)
+            set(Calendar.HOUR_OF_DAY, 10)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        assertEquals("عبارت سه روز دیگه باید دقیقاً سه روز جلو برود", expected, result.targetTimestamp)
+        assertTrue("عنوان باید کار اصلی را نگه دارد", result.title.contains("نون"))
+        assertFalse("عبارت تاریخ نباید در عنوان باقی بماند", result.title.contains("سه روز"))
+        assertTrue("ساعت ۱۰ بدون صبح/عصر باید ابهام داشته باشد", result.ambiguousFields.contains("HOUR_PERIOD_AM_PM"))
+    }
+
+    @Test
+    fun testCase16_NumericRelativeDaysStillWork() {
+        val result = PersianCommandAnalyzer.analyze("3 روز دیگه ساعت ۱۸ خرید نان", baseTime, tehranTimeZone)
+        val expected = Calendar.getInstance(tehranTimeZone).apply {
+            timeInMillis = baseTime
+            add(Calendar.DAY_OF_YEAR, 3)
+            set(Calendar.HOUR_OF_DAY, 18)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        assertEquals(expected, result.targetTimestamp)
+        assertTrue(result.title.contains("خرید نان"))
+        assertFalse(result.title.contains("3 روز"))
+    }
+
+    @Test
+    fun dateOnlyRequiresTimeAndDoesNotInventTimestamp() {
+        val result = PersianCommandAnalyzer.analyze("فردا یادم بنداز برم بانک", baseTime, tehranTimeZone)
+        assertTrue(result.hasExplicitDate)
+        assertFalse(result.hasExplicitTime)
+        assertNull(result.targetTimestamp)
+        assertNotNull(result.jalaliDateText)
+        assertTrue(result.needsUserClarification)
+    }
+
+    @Test
+    fun timeOnlyRequiresDateAndDoesNotAssumeTomorrow() {
+        val result = PersianCommandAnalyzer.analyze("ساعت ۱۰ صبح یادم بنداز برم بانک", baseTime, tehranTimeZone)
+        assertFalse(result.hasExplicitDate)
+        assertTrue(result.hasExplicitTime)
+        assertNull(result.targetTimestamp)
+        assertNull(result.jalaliDateText)
+        assertTrue(result.needsUserClarification)
+    }
+
+    @Test
+    fun missingBothDateAndTimeRequiresClarification() {
+        val result = PersianCommandAnalyzer.analyze("یادم بنداز برم بانک", baseTime, tehranTimeZone)
+        assertFalse(result.hasExplicitDate)
+        assertFalse(result.hasExplicitTime)
+        assertTrue(result.needsUserClarification)
+        assertNotNull(result.clarificationQuestion)
+    }
+
+    @Test
+    fun compactFourDigitClockFromPersianSpeechIsParsedAsHourAndMinute() {
+        val result = PersianCommandAnalyzer.analyze(
+            "فردا ساعت ۱۸۳۵ دقیقه یادم بنداز برم بانک",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertEquals("ساعت باید ۱۸ باشد", 18, result.hour)
+        assertEquals("دقیقه باید ۳۵ باشد، نه بخشی از عنوان", 35, result.minute)
+        assertEquals(ValidationStatus.VALID, result.validationStatus)
+        assertTrue("عنوان باید فقط کار بانکی را نگه دارد", result.title.contains("بانک"))
+        assertFalse("عدد ۳۵ نباید در عنوان باقی بماند", result.title.contains("35"))
+        assertFalse("واژه دقیقه نباید در عنوان باقی بماند", result.title.contains("دقیقه"))
+        assertNotNull(result.targetTimestamp)
+    }
+
+    @Test
+    fun persianClockWithColonAndMinuteWordKeepsMinuteOutOfTitle() {
+        val result = PersianCommandAnalyzer.analyze(
+            "فردا ساعت ۱۸:۳۵ دقیقه باید برم بانک",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertEquals(18, result.hour)
+        assertEquals(35, result.minute)
+        assertEquals(ValidationStatus.VALID, result.validationStatus)
+        assertTrue(result.title.contains("بانک"))
+        assertFalse(result.title.contains("35"))
+        assertFalse(result.title.contains("دقیقه"))
+        assertNotNull(result.targetTimestamp)
+    }
+
+    @Test
+    fun askingWhatWeekdayTodayIsIsNotParsedAsTodayPlusSaturdayConflict() {
+        val result = PersianCommandAnalyzer.analyze(
+            "امروز چند شنبه است؟",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertFalse("پرسش روز هفته نباید به‌عنوان تاریخ یادآور تفسیر شود", result.hasExplicitDate)
+        assertNull("نباید شنبه را به‌عنوان روز درخواستی استخراج کند", result.requestedWeekday)
+        assertTrue("پرسش اطلاعاتی نباید تعارض زمانی بسازد", result.validationStatus != ValidationStatus.CONFLICT)
+        assertNull(result.conflictMessage)
+    }
+    @Test
+    fun dailyRecurrenceIsDetectedAndRemovedFromReminderTitle() {
+        val result = PersianCommandAnalyzer.analyze(
+            "هر روز ساعت ۱۰ صبح ورزش کنم",
+            baseTime,
+            tehranTimeZone
+        )
+        assertEquals("DAILY", result.repeatType)
+        assertTrue(result.title.contains("ورزش"))
+        assertFalse(result.title.contains("هر روز"))
+        assertEquals(10, result.hour)
+        assertNotNull(result.targetTimestamp)
+    }
+
+    @Test
+    fun yearlyAndWorkdayRecurrenceAreDetected() {
+        val yearly = PersianCommandAnalyzer.analyze("هر سال ساعت ۹ صبح تولدم را جشن بگیرم", baseTime, tehranTimeZone)
+        val workdays = PersianCommandAnalyzer.analyze("هر روز کاری ساعت ۸ صبح دارو بخورم", baseTime, tehranTimeZone)
+        assertEquals("YEARLY", yearly.repeatType)
+        assertEquals("WORKDAYS", workdays.repeatType)
+    }
+
 }
