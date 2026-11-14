@@ -13,10 +13,15 @@ object LocalPersianParser {
         val clean = text.trim()
         if (clean.isBlank()) return emptyList()
 
-        // Handle mind-dump / multi-task separated by "و همچنین", "سپس", "بعدش", or "،"
+        // Split only at strong task boundaries. Accept common Persian connectors even
+        // when the next task begins with "برای" (e.g. "و همچنین برای پس‌فردا ...").
+        // Ordinary conjunctions inside a task are deliberately preserved.
+        val nextTaskStart = """(?:برای\s+)?(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌_]?فردا|پسفردا|فردا|امروز|سال\s+آینده|\d+\s*روز|پنج\s+دقیقه|یک\s+ربع|نیم\s+ساعت|هر|ساعت)"""
         val segments = clean.split(
-            Regex("""(?<=[،\n])|\s+و\s+(?:همچنین\s+)?(?=(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌_]?فردا|پسفردا|فردا|امروز|سال آینده|پنج دقیقه|یک ربع|نیم ساعت|هر|ساعت))""")
-        ).map { it.trim().trim('،', ' ', '.') }.filter { it.isNotBlank() }
+            Regex(
+                """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
+            )
+        ).map { it.trim().removePrefix("سپس").removePrefix("بعدش").trim().trim('،', '؛', ' ', '.') }.filter { it.isNotBlank() }
 
         val tasks = mutableListOf<ParsedTask>()
         for (segment in segments) {

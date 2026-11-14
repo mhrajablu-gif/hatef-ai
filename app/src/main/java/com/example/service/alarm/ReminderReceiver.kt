@@ -14,16 +14,28 @@ import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 import com.example.data.db.AppDatabase
+import com.example.data.model.ReminderEntity
 import com.example.data.engine.PersianDateEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.Calendar
+import java.util.TimeZone
 
 class ReminderReceiver : BroadcastReceiver() {
 
     companion object {
-        const val CHANNEL_ID = "hatef_reminders_channel"
+        private const val CHANNEL_PREFIX = "hatef_reminders_"
         const val CHANNEL_NAME = "یادآوری‌های یادت"
+        private const val EXTRA_SNOOZE_MINUTES = "extra_snooze_minutes"
+
+        private fun channelIdForSound(soundUri: Uri): String {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+                .digest(soundUri.toString().toByteArray(Charsets.UTF_8))
+            return CHANNEL_PREFIX + digest.take(8).joinToString("") {
+                "%02x".format(it.toInt() and 0xff)
+            }
+        }
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -36,12 +48,27 @@ class ReminderReceiver : BroadcastReceiver() {
                 val desc = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_DESC) ?: ""
                 val time = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_TIME) ?: ""
                 val soundUriStr = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_SOUND_URI)
-                showNotification(context, reminderId, title, desc, time, soundUriStr)
+                val isAdvance = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_ADVANCE, false)
+                showNotification(context, reminderId, title, desc, time, soundUriStr, isAdvance)
+                // Only the due alarm advances a recurring series; advance notifications do not.
+                if (!isAdvance && reminderId > 0L) {
+                    val pendingResult = goAsync()
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            scheduleNextOccurrence(context, reminderId)
+                        } finally {
+                            pendingResult.finish()
+                        }
+                    }
+                }
             }
 
             AlarmScheduler.ACTION_COMPLETE_REMINDER -> {
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 notificationManager.cancel(reminderId.toInt())
+                notificationManager.cancel((reminderId + 100000).toInt())
+                // Completing from a notification must cancel both the main and advance alarms.
+                AlarmScheduler.cancelReminder(context, reminderId)
 
                 val pendingResult = goAsync()
                 CoroutineScope(Dispatchers.IO).launch {
@@ -64,13 +91,16 @@ class ReminderReceiver : BroadcastReceiver() {
                         val db = AppDatabase.getDatabase(context)
                         val reminder = db.reminderDao().getReminderById(reminderId)
                         if (reminder != null) {
-                            val newTrigger = System.currentTimeMillis() + 15 * 60 * 1000L
+                            val snoozeMinutes = intent.getIntExtra(EXTRA_SNOOZE_MINUTES, 15).coerceIn(1, 24 * 60)
+                            val newTrigger = System.currentTimeMillis() + snoozeMinutes * 60 * 1000L
                             val jDate = PersianDateEngine.timestampToJalali(newTrigger)
                             val timeStr = PersianDateEngine.formatPersianTime(jDate.hour, jDate.minute)
                             val updated = reminder.copy(
                                 triggerTimestamp = newTrigger,
+                                jalaliDateText = jDate.formatPersianNumeric(),
                                 timeText = timeStr,
-                                isCompleted = false
+                                isCompleted = false,
+                                completedAt = null
                             )
                             db.reminderDao().update(updated)
                             AlarmScheduler.scheduleReminder(context, updated)
@@ -83,13 +113,83 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
+    /**
+     * Keep each occurrence as a separate Room row so completion history remains intact.
+     */
+    private suspend fun scheduleNextOccurrence(context: Context, reminderId: Long) {
+        val db = AppDatabase.getDatabase(context)
+        val current = db.reminderDao().getReminderById(reminderId) ?: return
+        if (current.repeatType.equals("NONE", ignoreCase = true) || current.isCompleted) return
+
+        val nextTimestamp = calculateNextOccurrence(current) ?: return
+        if (current.recurrenceEndDate != null && nextTimestamp > current.recurrenceEndDate) return
+
+        val zone = TimeZone.getTimeZone("Asia/Tehran")
+        val nextJalali = PersianDateEngine.timestampToJalali(nextTimestamp, zone)
+        val next = current.copy(
+            id = 0L,
+            triggerTimestamp = nextTimestamp,
+            jalaliDateText = nextJalali.formatPersianNumeric(),
+            timeText = PersianDateEngine.formatPersianTime(nextJalali.hour, nextJalali.minute),
+            isCompleted = false,
+            completedAt = null,
+            createdAt = System.currentTimeMillis()
+        )
+        val newId = db.reminderDao().insert(next)
+        AlarmScheduler.scheduleReminder(context, next.copy(id = newId))
+    }
+
+    private fun calculateNextOccurrence(reminder: ReminderEntity): Long? {
+        val zone = TimeZone.getTimeZone("Asia/Tehran")
+        val calendar = Calendar.getInstance(zone).apply {
+            timeInMillis = reminder.triggerTimestamp
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+        when (reminder.repeatType.uppercase()) {
+            "DAILY" -> calendar.add(Calendar.DAY_OF_YEAR, 1)
+            "WEEKLY" -> {
+                val days = reminder.recurrenceDaysOfWeek
+                    ?.split(",")?.map { it.trim().uppercase() }?.filter { it.isNotEmpty() }
+                if (days.isNullOrEmpty() || days.contains("EVEN_DAYS")) {
+                    calendar.add(Calendar.DAY_OF_YEAR, 7)
+                } else {
+                    val names = mapOf(
+                        Calendar.SATURDAY to "SAT", Calendar.SUNDAY to "SUN",
+                        Calendar.MONDAY to "MON", Calendar.TUESDAY to "TUE",
+                        Calendar.WEDNESDAY to "WED", Calendar.THURSDAY to "THU",
+                        Calendar.FRIDAY to "FRI"
+                    )
+                    var found = false
+                    repeat(7) {
+                        if (!found) {
+                            calendar.add(Calendar.DAY_OF_YEAR, 1)
+                            if (names[calendar.get(Calendar.DAY_OF_WEEK)] in days) found = true
+                        }
+                    }
+                    if (!found) return null
+                }
+            }
+            "MONTHLY" -> calendar.add(Calendar.MONTH, 1)
+            "YEARLY" -> calendar.add(Calendar.YEAR, 1)
+            "WORKDAYS" -> {
+                do {
+                    calendar.add(Calendar.DAY_OF_YEAR, 1)
+                } while (calendar.get(Calendar.DAY_OF_WEEK) == Calendar.FRIDAY)
+            }
+            else -> return null
+        }
+        return calendar.timeInMillis
+    }
+
     private fun showNotification(
         context: Context,
         reminderId: Long,
         title: String,
         description: String,
         time: String,
-        soundUriStr: String?
+        soundUriStr: String?,
+        isAdvance: Boolean
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -105,6 +205,12 @@ class ReminderReceiver : BroadcastReceiver() {
             AlarmSoundPreferences.getResolvedSoundUri(context)
         }
 
+        val notificationChannelId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            channelIdForSound(soundUri)
+        } else {
+            CHANNEL_PREFIX + "legacy"
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val audioAttributes = AudioAttributes.Builder()
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -112,7 +218,7 @@ class ReminderReceiver : BroadcastReceiver() {
                 .build()
 
             val channel = NotificationChannel(
-                CHANNEL_ID,
+                notificationChannelId,
                 CHANNEL_NAME,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
@@ -141,11 +247,6 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Try direct launch for instant full-screen wake-up
-        try {
-            context.startActivity(fullScreenIntent)
-        } catch (_: Exception) {}
-
         // Tap to open app
         val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -170,21 +271,29 @@ class ReminderReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Action: Snooze 15m
-        val snoozeIntent = Intent(context, ReminderReceiver::class.java).apply {
-            action = AlarmScheduler.ACTION_SNOOZE_REMINDER
-            putExtra(AlarmScheduler.EXTRA_REMINDER_ID, reminderId)
+        // Distinct request codes prevent Android from reusing one snooze PendingIntent.
+        fun createSnoozePendingIntent(minutes: Int): PendingIntent {
+            val snoozeIntent = Intent(context, ReminderReceiver::class.java).apply {
+                action = AlarmScheduler.ACTION_SNOOZE_REMINDER
+                putExtra(AlarmScheduler.EXTRA_REMINDER_ID, reminderId)
+                putExtra(EXTRA_SNOOZE_MINUTES, minutes)
+            }
+            return PendingIntent.getBroadcast(
+                context,
+                (reminderId + 300000 + minutes).toInt(),
+                snoozeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
         }
-        val snoozePendingIntent = PendingIntent.getBroadcast(
-            context,
-            (reminderId + 300000).toInt(),
-            snoozeIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        val snooze5PendingIntent = createSnoozePendingIntent(5)
+        val snooze15PendingIntent = createSnoozePendingIntent(15)
 
         val fullBody = if (time.isNotBlank()) "⏰ ساعت $time | $description" else description
+        // Keep the advance warning separate from the actual due-time notification.
+        // It must not expose actions that complete or snooze the underlying reminder.
+        val notificationId = if (isAdvance) (reminderId + 100000).toInt() else reminderId.toInt()
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, notificationChannelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(fullBody)
@@ -196,10 +305,15 @@ class ReminderReceiver : BroadcastReceiver() {
             .setSound(soundUri)
             .setVibrate(longArrayOf(0, 400, 200, 400))
             .setContentIntent(contentPendingIntent)
-            .setFullScreenIntent(fullScreenPendingIntent, true)
-            .addAction(0, "✅ انجام شد", donePendingIntent)
-            .addAction(0, "⏱ ۱۵ دقیقه بعد", snoozePendingIntent)
 
-        notificationManager.notify(reminderId.toInt(), builder.build())
+        if (!isAdvance) {
+            builder
+                .setFullScreenIntent(fullScreenPendingIntent, true)
+                .addAction(0, "✅ انجام شد", donePendingIntent)
+                .addAction(0, "⏱ ۵ دقیقه", snooze5PendingIntent)
+                .addAction(0, "⏱ ۱۵ دقیقه", snooze15PendingIntent)
+        }
+
+        notificationManager.notify(notificationId, builder.build())
     }
 }
