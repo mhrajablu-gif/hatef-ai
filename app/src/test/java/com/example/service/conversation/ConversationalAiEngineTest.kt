@@ -696,6 +696,33 @@ class ConversationalAiEngineTest {
     }
 
     @Test
+    fun obligationWithDateAndTimeCreatesReminderWithoutReminderPhrase() = runBlocking {
+        val input = "فردا ساعت ۳ بعدازظهر باید برم استخر"
+        val turn = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals("بیان الزام و کار مشخص باید وارد مسیر یادآوری شود", ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull("باید پیش‌نویس یادآور ساخته شود", turn.newState.draftTask)
+        assertTrue("عنوان باید رفتن به استخر را حفظ کند: ${turn.newState.draftTask?.title}", turn.newState.draftTask?.title?.contains("استخر") == true)
+        assertEquals("ساعت ۳ بعدازظهر باید به ۱۵ تبدیل شود", 15, PersianDateEngine.timestampToJalali(turn.newState.draftTask!!.triggerTimestamp, tehranTimeZone).hour)
+        assertEquals(AwaitingField.EXECUTION_CONFIRMATION, turn.newState.awaitingField)
+        assertNotNull("پیش از ثبت باید کارت تأیید نمایش داده شود", turn.actionCard)
+    }
+
+    @Test
+    fun weekdayQuestionIsNotTreatedAsReminderRequest() {
+        val classifier = ConversationalAiEngine::class.java
+            .getDeclaredMethod("isAppointmentOrReminderAction", String::class.java)
+            .apply { isAccessible = true }
+        val isReminder = classifier.invoke(engine, "امروز چند شنبه است؟") as Boolean
+        assertFalse("پرسش درباره روز هفته نباید یادآور بسازد", isReminder)
+    }
+
+    @Test
     fun recurringTimedTaskWithoutReminderPhraseEntersReminderFlow() = runBlocking {
         val turn = engine.processTurn(
             userInput = "هر روز ساعت ۱۰ صبح ورزش کنم",
