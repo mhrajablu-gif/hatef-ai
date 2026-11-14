@@ -174,8 +174,15 @@ class Phase1ConversationalEngineTest {
             referenceTimeMillis = fixedReferenceMillis
         )
         assertEquals("نیت باید CREATE_REMINDER باشد", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
-        assertTrue("باید منتظر دریافت عنوان باشد", response.newState.awaitingField == AwaitingField.TITLE)
-        assertTrue("پاسخ باید بپرسد چه کاری", response.replyText.contains("چه کاری"))
+        // ساعت ۱۰ بدون صبح/شب مبهم است؛ قبل از پرسیدن عنوان باید ابهام برطرف شود.
+        assertTrue(
+            "ابتدا باید صبح یا شب بودن ساعت پرسیده شود",
+            response.newState.awaitingField == AwaitingField.AMBIGUOUS_HOUR_AM_PM
+        )
+        assertTrue(
+            "پاسخ باید درباره صبح یا شب بودن ساعت سؤال کند",
+            response.replyText.contains("صبح") && (response.replyText.contains("شب") || response.replyText.contains("عصر"))
+        )
     }
 
     @Test
