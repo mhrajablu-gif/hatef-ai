@@ -694,7 +694,7 @@ class ConversationalAiEngineTest {
             referenceTimeMillis = fixedReferenceMillis,
             timeZone = tehranTimeZone
         )
-        assertNotEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertTrue("اعلام برنامه شخصی نباید یادآور بسازد", turn.newState.activeIntent != ConversationIntent.CREATE_REMINDER)
         assertNull("اعلام برنامه شخصی نباید پیش‌نویس یادآور بسازد", turn.newState.draftTask)
     }
 
