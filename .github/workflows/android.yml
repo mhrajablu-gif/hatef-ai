@@ -5,6 +5,7 @@ on:
   pull_request:
     branches:
       - main
+      - release/yadet-1.17-review
   push:
     branches:
       - main
