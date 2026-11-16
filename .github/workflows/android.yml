@@ -8,7 +8,7 @@ on:
   push:
     branches:
       - main
-      - fix/yadet-1.19.1-multi-reminder-clarification
+      - fix/yadet-1.19.0-multi-reminder-clarification
 
 permissions:
   contents: read
