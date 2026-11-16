@@ -251,7 +251,7 @@ class PersianDateEngineTest {
         val task = tasks[0]
         assertTrue("Task should need clarification when time/date is missing", task.needsClarification)
         assertNotNull(task.clarificationQuestion)
-        assertTrue(task.clarificationQuestion!!.contains("ساعت یا تاریخ"))
+        assertTrue(task.clarificationQuestion!!.contains("تاریخ و ساعت"))
     }
 
     @Test
@@ -263,7 +263,8 @@ class PersianDateEngineTest {
         val task = tasks[0]
         assertTrue("Task should need clarification when title is missing", task.needsClarification)
         assertNotNull(task.clarificationQuestion)
-        assertTrue(task.clarificationQuestion!!.contains("عنوان یا موضوع"))
+        assertTrue(task.hasAmbiguousTimePeriod)
+        assertTrue(task.clarificationQuestion!!.contains("صبح است یا شب"))
     }
 
     @Test
