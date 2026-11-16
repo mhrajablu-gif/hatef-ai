@@ -24,8 +24,33 @@ object LocalPersianParser {
         ).map { it.trim().removePrefix("سپس").removePrefix("بعدش").trim().trim('،', '؛', ' ', '.') }.filter { it.isNotBlank() }
 
         val tasks = mutableListOf<ParsedTask>()
+        var inheritedDateText: String? = null
         for (segment in segments) {
-            tasks.add(parseSingleCommand(segment, referenceTimeMillis))
+            val parsed = parseSingleCommand(segment, referenceTimeMillis)
+            val task = if (!parsed.hasExplicitDate && parsed.hasExplicitTime && inheritedDateText != null) {
+                // In natural lists, users commonly state the date once and then give
+                // additional times ("tomorrow 9 bank and 12 doctor"). Carry the date
+                // forward only to later items that have their own explicit time.
+                val dateParts = PersianDateEngine.toEnglishDigits(inheritedDateText)
+                    .split("/", "-", ".")
+                    .mapNotNull { it.toIntOrNull() }
+                val timeParts = PersianDateEngine.toEnglishDigits(parsed.timeText)
+                    .split(":")
+                    .mapNotNull { it.toIntOrNull() }
+                if (dateParts.size == 3 && timeParts.size >= 2) {
+                    val timestamp = PersianDateEngine.jalaliToTimestamp(
+                        dateParts[0], dateParts[1], dateParts[2], timeParts[0], timeParts[1]
+                    )
+                    parsed.copy(
+                        triggerTimestamp = timestamp,
+                        jalaliDateText = inheritedDateText,
+                        timeText = PersianDateEngine.formatPersianTime(timeParts[0], timeParts[1]),
+                        hasExplicitDate = true
+                    )
+                } else parsed
+            } else parsed
+            if (task.hasExplicitDate) inheritedDateText = task.jalaliDateText
+            tasks.add(task)
         }
         return tasks
     }
