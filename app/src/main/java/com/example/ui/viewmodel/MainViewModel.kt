@@ -87,6 +87,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Conversational Agent & Tool Registry
     private val toolRegistry = com.example.service.conversation.AssistantToolRegistry(application, repository)
     private val conversationalEngine = com.example.service.conversation.ConversationalAiEngine(toolRegistry)
+    // Sequential queue: each independently parsed task is clarified and confirmed on its own.
+    private val pendingMultiReminderTasks = ArrayDeque<ParsedTask>()
 
     private val _conversationState = MutableStateFlow(com.example.service.conversation.ConversationState())
     val conversationState: StateFlow<com.example.service.conversation.ConversationState> = _conversationState.asStateFlow()
@@ -288,73 +290,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
             try {
-                // Multi-reminder messages use the same deterministic offline parser for typed
-                // and recognized speech. Only intercept when every extracted item has an
-                // explicit title, date, and time; ambiguous or partial input stays in the
-                // existing conversational slot-filling flow.
+                // Never collapse a multi-task message into the engine's single draft slot.
+                // Queue every extracted task, including incomplete ones, and process them one by one.
                 if (!_conversationState.value.isWaitingForAnswer()) {
                     val multiTasks = LocalPersianParser.parse(clean)
-                    val ambiguousTasks = multiTasks.filter { it.isAmbiguous || it.hasAmbiguousTimePeriod }
-                    // A single ambiguous hour (e.g. "ساعت ۵") must not collapse an otherwise
-                    // correctly split multi-reminder request into one combined reminder.
-                    val isStructuredMultiReminder = multiTasks.size > 1 &&
-                        ambiguousTasks.size <= 1 &&
-                        multiTasks.all { task ->
-                            task.hasExplicitTitle && task.hasExplicitDate && task.hasExplicitTime &&
-                                (task.needsClarification == (task.isAmbiguous || task.hasAmbiguousTimePeriod))
-                        }
-                    if (isStructuredMultiReminder) {
-                        val ambiguousTask = ambiguousTasks.firstOrNull()
-                        val previewTasks = multiTasks.filterNot { it === ambiguousTask }
-                        val previewMessages = buildList {
-                            add(
-                                com.example.service.conversation.ChatMessage(
-                                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                                    text = "چند کار مستقل تشخیص دادم. هر یادآور جداگانه بررسی و تأیید می‌شود؛ هیچ موردی بدون تأیید شما ذخیره نخواهد شد."
-                                )
-                            )
-                            previewTasks.forEachIndexed { index, task ->
-                                add(
-                                    com.example.service.conversation.ChatMessage(
-                                        sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                                        text = "پیش‌نمایش یادآور ${index + 1} از ${multiTasks.size}",
-                                        actionCard = com.example.service.conversation.ConversationActionCard(
-                                            type = com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER,
-                                            task = task
-                                        )
-                                    )
-                                )
-                            }
-                            if (ambiguousTask != null) {
-                                val hour = ambiguousTask.timeText.substringBefore(":")
-                                val question = ambiguousTask.clarificationQuestion
-                                    ?: "برای «${ambiguousTask.title}» منظورتان ساعت $hour صبح است یا عصر؟"
-                                add(
-                                    com.example.service.conversation.ChatMessage(
-                                        sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                                        text = question,
-                                        suggestedReplies = listOf("صبح", "عصر")
-                                    )
-                                )
-                            }
-                        }
-                        if (ambiguousTask != null) {
-                            val hour = ambiguousTask.timeText.substringBefore(":")
-                            val question = ambiguousTask.clarificationQuestion
-                                ?: "برای «${ambiguousTask.title}» منظورتان ساعت $hour صبح است یا عصر؟"
-                            _conversationState.value = _conversationState.value.copy(
-                                activeIntent = com.example.service.conversation.ConversationIntent.CREATE_REMINDER,
-                                slotStatus = com.example.service.conversation.SlotFillingStatus.COLLECTING_SLOTS,
-                                awaitingField = com.example.service.conversation.AwaitingField.AMBIGUOUS_HOUR_AM_PM,
-                                draftTask = ambiguousTask,
-                                lastAssistantQuestion = question
-                            )
-                        }
-                        _chatMessages.value = _chatMessages.value + previewMessages
-                        ttsSpeaker.speak(
-                            if (ambiguousTask == null) "چند یادآور جداگانه شناسایی کردم. لطفاً هرکدام را بررسی و تأیید کنید."
-                            else "چند یادآور جداگانه شناسایی کردم. برای یکی از ساعت‌ها لطفاً صبح یا عصر را مشخص کنید."
-                        )
+                    if (multiTasks.size > 1) {
+                        pendingMultiReminderTasks.clear()
+                        pendingMultiReminderTasks.addAll(multiTasks)
+                        presentNextMultiReminder()
                         return@launch
                     }
                 }
@@ -377,6 +320,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 _chatMessages.value = _chatMessages.value + assistantMsg
                 ttsSpeaker.speak(response.replyText)
+
+                if (pendingMultiReminderTasks.isNotEmpty()) {
+                    when {
+                        response.executedResult?.success == true ||
+                            response.newState.slotStatus == com.example.service.conversation.SlotFillingStatus.CANCELLED -> {
+                            pendingMultiReminderTasks.removeFirst()
+                            presentNextMultiReminder()
+                        }
+                    }
+                }
 
                 if (response.executedResult != null && response.executedResult.success) {
                     _uiState.value = _uiState.value.copy(
@@ -409,6 +362,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Shows the next queued reminder as a clarification or confirmation.
+     * The queue advances only after successful saving or explicit cancellation.
+     */
+    private fun presentNextMultiReminder() {
+        val task = pendingMultiReminderTasks.firstOrNull() ?: run {
+            _conversationState.value = com.example.service.conversation.ConversationState()
+            return
+        }
+
+        val awaitingField: com.example.service.conversation.AwaitingField
+        val question: String
+        val suggestions: List<String>
+        when {
+            task.isAmbiguous || task.hasAmbiguousTimePeriod -> {
+                awaitingField = com.example.service.conversation.AwaitingField.AMBIGUOUS_HOUR_AM_PM
+                val hour = task.timeText.substringBefore(":")
+                question = task.clarificationQuestion ?: "برای «${task.title}» منظورتان ساعت $hour صبح است یا عصر؟"
+                suggestions = listOf("صبح", "عصر")
+            }
+            !task.hasExplicitTitle -> {
+                awaitingField = com.example.service.conversation.AwaitingField.TITLE
+                question = if (task.hasExplicitDate && task.hasExplicitTime) {
+                    "برای ${task.jalaliDateText} ساعت ${task.timeText} چه کاری را باید یادتان بیندازم؟"
+                } else {
+                    "برای این یادآوری چه کاری را باید ثبت کنم؟"
+                }
+                suggestions = listOf("جلسه کاری", "تماس تلفنی", "رفتن به بانک")
+            }
+            !task.hasExplicitDate || !task.hasExplicitTime -> {
+                awaitingField = com.example.service.conversation.AwaitingField.TIME_OR_DATE
+                question = when {
+                    !task.hasExplicitDate && !task.hasExplicitTime ->
+                        "برای «${task.title}» چه روز و ساعتی تنظیم کنم؟"
+                    !task.hasExplicitDate ->
+                        "ساعت مشخص است؛ تاریخ یادآوری «${task.title}» چه روزی باشد؟"
+                    else ->
+                        "تاریخ مشخص است؛ یادآوری «${task.title}» را چه ساعتی تنظیم کنم؟"
+                }
+                suggestions = when {
+                    !task.hasExplicitDate && !task.hasExplicitTime -> listOf("فردا ساعت ۹ صبح", "امروز ساعت ۱۸", "نیم ساعت دیگر")
+                    !task.hasExplicitDate -> listOf("امروز", "فردا", "پس‌فردا")
+                    else -> listOf("ساعت ۹ صبح", "ساعت ۱۸", "نیم ساعت دیگر")
+                }
+            }
+            else -> {
+                awaitingField = com.example.service.conversation.AwaitingField.EXECUTION_CONFIRMATION
+                question = "یادآور «${task.title}» برای ${task.jalaliDateText} ساعت ${task.timeText} ثبت شود؟"
+                suggestions = listOf("آره، ثبت کن", "لغو", "تغییر زمان")
+            }
+        }
+
+        val ready = awaitingField == com.example.service.conversation.AwaitingField.EXECUTION_CONFIRMATION
+        _conversationState.value = com.example.service.conversation.ConversationState(
+            activeIntent = com.example.service.conversation.ConversationIntent.CREATE_REMINDER,
+            slotStatus = if (ready) com.example.service.conversation.SlotFillingStatus.AWAITING_CONFIRMATION
+                else com.example.service.conversation.SlotFillingStatus.COLLECTING_SLOTS,
+            awaitingField = awaitingField,
+            lastAssistantQuestion = question,
+            draftTask = task
+        )
+        val message = com.example.service.conversation.ChatMessage(
+            sender = com.example.service.conversation.MessageSender.ASSISTANT,
+            text = question,
+            actionCard = if (ready) com.example.service.conversation.ConversationActionCard(
+                type = com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER,
+                task = task,
+                primaryActionLabel = "آره، ثبت کن",
+                secondaryActionLabel = "لغو"
+            ) else null,
+            suggestedReplies = suggestions
+        )
+        _chatMessages.value = _chatMessages.value + message
+        ttsSpeaker.speak(question)
+    }
+
     fun clearConversation() {
         _conversationState.value = com.example.service.conversation.ConversationState()
         _chatMessages.value = listOf(initialWelcomeMessage)
@@ -439,6 +468,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         val pendingClarification = _conversationState.value.awaitingField !=
                             com.example.service.conversation.AwaitingField.NONE &&
+                            _conversationState.value.awaitingField != com.example.service.conversation.AwaitingField.EXECUTION_CONFIRMATION &&
                             _conversationState.value.draftTask != null
                         _conversationState.value = _conversationState.value.copy(
                             slotStatus = if (pendingClarification) {
@@ -468,6 +498,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         _chatMessages.value = _chatMessages.value + assistantMsg
                         ttsSpeaker.speak(confirmReply)
+                        if (result.success && pendingMultiReminderTasks.firstOrNull() == task) {
+                            pendingMultiReminderTasks.removeFirst()
+                            presentNextMultiReminder()
+                        }
                     }
                 }
                 com.example.service.conversation.ActionCardType.CONFIRM_DELETE_REMINDER -> {
@@ -533,6 +567,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             suggestedReplies = listOf("یادآور جدید", "یادآورهای امروز")
         )
         _chatMessages.value = _chatMessages.value + cancelMsg
+        if (pendingMultiReminderTasks.isNotEmpty()) {
+            pendingMultiReminderTasks.removeFirst()
+            presentNextMultiReminder()
+        }
     }
 
     fun parseSpokenCommand(text: String) {
