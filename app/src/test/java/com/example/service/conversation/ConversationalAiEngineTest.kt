@@ -2,6 +2,7 @@ package com.example.service.conversation
 
 import com.example.data.engine.PersianDateEngine
 import com.example.data.model.ReminderEntity
+import com.example.service.ai.LocalPersianParser
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -792,5 +793,20 @@ class ConversationalAiEngineTest {
         assertEquals("تماس با همکار", turn.newState.draftTask?.title)
         assertEquals("۰۹:۰۰", turn.newState.draftTask?.timeText)
         assertTrue("باید منتظر تأیید یا رفع ابهام بماند", turn.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun multiReminderItemsInheritSharedDateAndRelativeDurationIsComplete() {
+        val tasks = LocalPersianParser.parse(
+            "فردا ساعت ۹ تماس با مدیر و ساعت ۱۲ خرید نان",
+            fixedReferenceMillis
+        )
+        assertEquals("باید دو کار جدا استخراج شوند", 2, tasks.size)
+        assertTrue("کار دوم باید تاریخ اعلام‌شده برای فهرست را به ارث ببرد", tasks[1].hasExplicitDate)
+        assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
+        assertEquals("۱۲:۰۰", tasks[1].timeText)
+
+        val relative = LocalPersianParser.parse("یک ربع دیگه تماس با همکار", fixedReferenceMillis).single()
+        assertTrue("مدت نسبی باید تاریخ و ساعت را مشخص کند", relative.hasExplicitDate && relative.hasExplicitTime)
     }
 }
