@@ -135,7 +135,7 @@ jobs:
           VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionCode='([^']+)'.*/\\1/p")"
           VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionName='([^']+)'.*/\\1/p")"
           test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq"
-          test "$VERSION_CODE" = "29"
+          test "$VERSION_CODE" = "30"
           test "$VERSION_NAME" = "1.19.1"
 
           VERIFY_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
