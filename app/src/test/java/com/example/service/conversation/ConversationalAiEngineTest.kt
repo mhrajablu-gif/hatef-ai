@@ -878,6 +878,10 @@ class ConversationalAiEngineTest {
         assertTrue(
             engine.shouldRouteAsReminderAction("فردا ساعت ۹ به بانک بروم و پس فردا به دکتر زنگ بزنم")
         )
+        assertTrue(
+            "یک کار ناقص در فهرست چندکار نباید باعث ادغام کل پیام شود",
+            engine.shouldRouteAsReminderAction("فردا ساعت ۹ به بانک بروم، به دکتر زنگ بزنم")
+        )
         assertFalse(
             engine.shouldRouteAsReminderAction("فردا خیلی خسته‌ام و پس‌فردا می‌خواهم استراحت کنم")
         )
