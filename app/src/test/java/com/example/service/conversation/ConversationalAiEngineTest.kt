@@ -809,4 +809,68 @@ class ConversationalAiEngineTest {
         val relative = LocalPersianParser.parse("یک ربع دیگه تماس با همکار", fixedReferenceMillis).single()
         assertTrue("مدت نسبی باید تاریخ و ساعت را مشخص کند", relative.hasExplicitDate && relative.hasExplicitTime)
     }
+
+    @Test
+    fun calendarQuestionsAreAnsweredLocallyForTodayAndTomorrow() = runBlocking {
+        val today = engine.processTurn(
+            userInput = "امروز چند شنبه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.INFORMATIONAL_QA, today.newState.activeIntent)
+        assertTrue("پاسخ روز هفته باید محلی و دقیق باشد: ${today.replyText}", today.replyText.contains("دوشنبه"))
+        assertNull("پرسش تقویمی نباید یادآور بسازد", today.newState.draftTask)
+
+        val tomorrow = engine.processTurn(
+            userInput = "فردا چند شنبه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.INFORMATIONAL_QA, tomorrow.newState.activeIntent)
+        assertTrue("روز هفته فردا باید سه‌شنبه باشد: ${tomorrow.replyText}", tomorrow.replyText.contains("سه‌شنبه"))
+        assertNull("پرسش درباره فردا نباید یادآور بسازد", tomorrow.newState.draftTask)
+
+        val date = engine.processTurn(
+            userInput = "امروز چندمه؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertTrue("تاریخ شمسی باید در پاسخ باشد: ${date.replyText}", date.replyText.contains("آبان"))
+        assertTrue(date.replyText.contains("۱۴۰۵"))
+    }
+
+    @Test
+    fun calendarQuestionCancelsUnrelatedPendingReminderClarification() = runBlocking {
+        val pending = ConversationState(
+            activeIntent = ConversationIntent.CREATE_REMINDER,
+            draftTask = com.example.service.ai.ParsedTask(
+                title = "جلسه",
+                description = "جلسه",
+                rawTimePhrase = "فردا",
+                triggerTimestamp = fixedReferenceMillis + 86_400_000L,
+                jalaliDateText = "۱۴۰۵/۰۸/۰۵",
+                timeText = "۱۰:۰۰",
+                hasExplicitTitle = true,
+                hasExplicitDate = true
+            ),
+            awaitingField = AwaitingField.TIME_OR_DATE,
+            slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+            lastAssistantQuestion = "چه ساعتی؟"
+        )
+
+        val response = engine.processTurn(
+            userInput = "امروز چند شنبه است؟",
+            currentState = pending,
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(ConversationIntent.INFORMATIONAL_QA, response.newState.activeIntent)
+        assertEquals(AwaitingField.NONE, response.newState.awaitingField)
+        assertNull("پیش‌نویس یادآور قبلی نباید به سؤال تقویمی نشت کند", response.newState.draftTask)
+        assertTrue(response.replyText.contains("دوشنبه"))
+    }
 }
