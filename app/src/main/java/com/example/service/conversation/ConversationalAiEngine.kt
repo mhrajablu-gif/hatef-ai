@@ -171,6 +171,13 @@ class ConversationalAiEngine(
      * the currently requested reminder slot. Short answers such as "صبح" or
      * "فردا" intentionally do not match these markers.
      */
+    /**
+     * Shared reminder-intent gate for callers that need to split multi-task messages
+     * before entering this engine's single-draft conversation flow.
+     */
+    fun shouldRouteAsReminderAction(input: String): Boolean =
+        isAppointmentOrReminderAction(input)
+
     private fun isTopicSwitchQuestion(input: String): Boolean {
         val clean = input.trim().lowercase()
         if (isQueryRemindersIntent(clean)) return true
