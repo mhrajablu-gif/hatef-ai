@@ -155,8 +155,8 @@ jobs:
         run: |
           mkdir -p release
           cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.19.0.apk
-          test -s release/yadet-v1.18.9.apk
-          sha256sum release/yadet-v1.18.9.apk
+          test -s release/yadet-v1.19.0.apk
+          sha256sum release/yadet-v1.19.0.apk
 
       - name: Upload unit test reports
         if: always()
@@ -172,7 +172,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: yadet-v1.19.0
-          path: release/yadet-v1.18.9.apk
+          path: release/yadet-v1.19.0.apk
           retention-days: 14
 
 # Rebuild after stable signing-key restoration and Android version bump.
