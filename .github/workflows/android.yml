@@ -156,7 +156,7 @@ jobs:
           mkdir -p release
           cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.18.9.apk
           test -s release/yadet-v1.18.9.apk
-          sha256sum release/yadet-v1.18.8.apk
+          sha256sum release/yadet-v1.18.9.apk
 
       - name: Upload unit test reports
         if: always()
