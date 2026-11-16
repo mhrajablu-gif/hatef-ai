@@ -91,7 +91,7 @@ class ReminderReceiver : BroadcastReceiver() {
                         val db = AppDatabase.getDatabase(context)
                         val reminder = db.reminderDao().getReminderById(reminderId)
                         if (reminder != null) {
-                            val snoozeMinutes = intent.getIntExtra(EXTRA_SNOOZE_MINUTES, 15).coerceIn(1, 24 * 60)
+                            val snoozeMinutes = intent.getIntExtra(EXTRA_SNOOZE_MINUTES, 15).coerceIn(1, 30 * 24 * 60)
                             val newTrigger = System.currentTimeMillis() + snoozeMinutes * 60 * 1000L
                             val jDate = PersianDateEngine.timestampToJalali(newTrigger)
                             val timeStr = PersianDateEngine.formatPersianTime(jDate.hour, jDate.minute)
