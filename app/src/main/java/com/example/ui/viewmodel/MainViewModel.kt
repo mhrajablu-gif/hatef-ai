@@ -439,6 +439,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun clearConversation() {
+        pendingMultiReminderTasks.clear()
         _conversationState.value = com.example.service.conversation.ConversationState()
         _chatMessages.value = listOf(initialWelcomeMessage)
     }
