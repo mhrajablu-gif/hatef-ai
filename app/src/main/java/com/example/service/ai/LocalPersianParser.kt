@@ -42,8 +42,11 @@ object LocalPersianParser {
         }
         val dateText = analysis.jalaliDateText ?: jDate.formatPersianNumeric()
 
-        val hasExplicitTime = analysis.hour != null
-        val hasExplicitDate = analysis.jalaliDateText != null
+        val hasRelativeDateTime = rawSegment.contains("دیگه") || rawSegment.contains("بعد") || rawSegment.contains("دیگر")
+        val hasRelativeDuration = hasRelativeDateTime &&
+            (rawSegment.contains("دقیقه") || rawSegment.contains("ساعت"))
+        val hasExplicitTime = analysis.hasExplicitTime || hasRelativeDuration
+        val hasExplicitDate = analysis.hasExplicitDate || hasRelativeDuration
         val hasExplicitTitle = analysis.title.isNotBlank() && !analysis.title.startsWith("یادآوری ساعت")
 
         return ParsedTask(
