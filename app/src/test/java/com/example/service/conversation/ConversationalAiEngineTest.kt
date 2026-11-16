@@ -735,4 +735,36 @@ class ConversationalAiEngineTest {
         assertEquals("DAILY", turn.newState.draftTask?.repeatType)
     }
 
+    @Test
+    fun unrelatedReminderQueryInterruptsPendingTimeClarification() = runBlocking {
+        val draft = com.example.service.ai.ParsedTask(
+            title = "جلسه کاری",
+            triggerTimestamp = fixedReferenceMillis + 86_400_000L,
+            jalaliDateText = "۱۴۰۵/۰۸/۰۵",
+            timeText = "۱۰:۰۰",
+            hasExplicitTitle = true,
+            hasExplicitTime = false,
+            hasExplicitDate = true
+        )
+        val waitingState = ConversationState(
+            activeIntent = ConversationIntent.CREATE_REMINDER,
+            draftTask = draft,
+            awaitingField = AwaitingField.TIME_OR_DATE,
+            slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+            lastAssistantQuestion = "یادآوری را چه ساعتی تنظیم کنم؟"
+        )
+
+        val response = engine.processTurn(
+            userInput = "چه یادآورهایی دارم؟",
+            currentState = waitingState,
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(AwaitingField.NONE, response.newState.awaitingField)
+        assertNull("پیش‌نویس قدیمی نباید به پرسش جدید نشت کند", response.newState.draftTask)
+        assertTrue(response.replyText.contains("هیچ یادآور فعالی"))
+    }
+
+
 }
