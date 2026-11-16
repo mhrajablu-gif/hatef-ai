@@ -51,6 +51,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -67,6 +68,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -297,6 +300,9 @@ fun FullScreenAlarmScreen(
 ) {
     var currentTimeString by remember { mutableStateOf("") }
     var showSnoozeOptions by remember { mutableStateOf(false) }
+    var customSnoozeDuration by remember { mutableStateOf("30") }
+    var customSnoozeUnit by remember { mutableStateOf("دقیقه") }
+    var customSnoozeError by remember { mutableStateOf(false) }
     val currentJalali = PersianDateEngine.timestampToJalali(System.currentTimeMillis())
     val weekday = PersianDateEngine.getPersianWeekdayName(System.currentTimeMillis())
 
@@ -315,7 +321,38 @@ fun FullScreenAlarmScreen(
         AlertDialog(
             onDismissRequest = { showSnoozeOptions = false },
             title = { Text("مدت زمان تعویق") },
-            text = { Text("یادآوری را چه مدت به تعویق بیندازم؟") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("یادآوری را چه مدت به تعویق بیندازم؟")
+                    OutlinedTextField(
+                        value = customSnoozeDuration,
+                        onValueChange = {
+                            customSnoozeDuration = it.filter(Char::isDigit).take(5)
+                            customSnoozeError = false
+                        },
+                        label = { Text("مدت دلخواه") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                        listOf("دقیقه", "ساعت", "روز").forEach { unit ->
+                            TextButton(onClick = {
+                                customSnoozeUnit = unit
+                                customSnoozeError = false
+                            }) {
+                                Text(if (customSnoozeUnit == unit) "✓ $unit" else unit)
+                            }
+                        }
+                    }
+                    if (customSnoozeError) {
+                        Text(
+                            "مدت باید بین ۱ دقیقه تا ۳۰ روز باشد.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
             confirmButton = {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -331,6 +368,23 @@ fun FullScreenAlarmScreen(
                                 Text(if (minutes == 60) "۱ ساعت" else "۳۰ دقیقه")
                             }
                         }
+                    }
+                    TextButton(onClick = {
+                        val value = customSnoozeDuration.toIntOrNull()
+                        val multiplier = when (customSnoozeUnit) {
+                            "ساعت" -> 60
+                            "روز" -> 24 * 60
+                            else -> 1
+                        }
+                        val maxValue = (30 * 24 * 60) / multiplier
+                        if (value != null && value in 1..maxValue) {
+                            showSnoozeOptions = false
+                            onSnooze(value * multiplier)
+                        } else {
+                            customSnoozeError = true
+                        }
+                    }) {
+                        Text("ثبت مدت دلخواه")
                     }
                 }
             },
