@@ -31,4 +31,22 @@ class LocalPersianParserTest {
 
         assertEquals(1, tasks.size)
     }
+    @Test
+    fun splitsTwoTasksWhenSecondHourNeedsAmPmClarification() {
+        val input = "فردا ساعت ۱۸ نون بخرم و ساعت ۵ برم سبزی بخرم"
+
+        val tasks = LocalPersianParser.parse(input, referenceTimeMillis = 1_794_556_800_000L)
+
+        assertEquals(2, tasks.size)
+        assertEquals(true, tasks[0].hasExplicitDate)
+        assertEquals(true, tasks[0].hasExplicitTime)
+        assertEquals(false, tasks[0].isAmbiguous)
+        assertEquals(true, tasks[1].hasExplicitDate)
+        assertEquals(true, tasks[1].hasExplicitTime)
+        assertEquals(true, tasks[1].isAmbiguous)
+        assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
+        assertEquals("۱۸:۰۰", tasks[0].timeText)
+        assertEquals("۰۵:۰۰", tasks[1].timeText)
+    }
+
 }
