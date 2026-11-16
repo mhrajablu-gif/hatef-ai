@@ -294,7 +294,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // Queue every extracted task, including incomplete ones, and process them one by one.
                 if (!_conversationState.value.isWaitingForAnswer()) {
                     val multiTasks = LocalPersianParser.parse(clean)
-                    if (multiTasks.size > 1) {
+                    val isReminderRequest = conversationalEngine.shouldRouteAsReminderAction(clean)
+                    val everyTaskHasTimeCue = multiTasks.all { it.hasExplicitDate || it.hasExplicitTime }
+                    if (multiTasks.size > 1 && isReminderRequest && everyTaskHasTimeCue) {
                         pendingMultiReminderTasks.clear()
                         pendingMultiReminderTasks.addAll(multiTasks)
                         presentNextMultiReminder()
