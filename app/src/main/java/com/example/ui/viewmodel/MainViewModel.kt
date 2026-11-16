@@ -294,19 +294,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // existing conversational slot-filling flow.
                 if (!_conversationState.value.isWaitingForAnswer()) {
                     val multiTasks = LocalPersianParser.parse(clean)
-                    val isCompleteMultiReminder = multiTasks.size > 1 && multiTasks.all { task ->
-                        task.hasExplicitTitle && task.hasExplicitDate && task.hasExplicitTime &&
-                            !task.isAmbiguous && !task.needsClarification
-                    }
-                    if (isCompleteMultiReminder) {
+                    val ambiguousTasks = multiTasks.filter { it.isAmbiguous || it.hasAmbiguousTimePeriod }
+                    // A single ambiguous hour (e.g. "ساعت ۵") must not collapse an otherwise
+                    // correctly split multi-reminder request into one combined reminder.
+                    val isStructuredMultiReminder = multiTasks.size > 1 &&
+                        ambiguousTasks.size <= 1 &&
+                        multiTasks.all { task ->
+                            task.hasExplicitTitle && task.hasExplicitDate && task.hasExplicitTime &&
+                                (task.needsClarification == (task.isAmbiguous || task.hasAmbiguousTimePeriod))
+                        }
+                    if (isStructuredMultiReminder) {
+                        val ambiguousTask = ambiguousTasks.firstOrNull()
+                        val previewTasks = multiTasks.filterNot { it === ambiguousTask }
                         val previewMessages = buildList {
                             add(
                                 com.example.service.conversation.ChatMessage(
                                     sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                                    text = "چند یادآور مستقل تشخیص دادم. هر مورد را جداگانه بررسی و تأیید کنید؛ تا پیش از تأیید شما هیچ‌کدام ذخیره نمی‌شوند."
+                                    text = "چند کار مستقل تشخیص دادم. هر یادآور جداگانه بررسی و تأیید می‌شود؛ هیچ موردی بدون تأیید شما ذخیره نخواهد شد."
                                 )
                             )
-                            multiTasks.forEachIndexed { index, task ->
+                            previewTasks.forEachIndexed { index, task ->
                                 add(
                                     com.example.service.conversation.ChatMessage(
                                         sender = com.example.service.conversation.MessageSender.ASSISTANT,
@@ -318,9 +325,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     )
                                 )
                             }
+                            if (ambiguousTask != null) {
+                                val hour = ambiguousTask.timeText.substringBefore(":")
+                                val question = ambiguousTask.clarificationQuestion
+                                    ?: "برای «${ambiguousTask.title}» منظورتان ساعت $hour صبح است یا عصر؟"
+                                add(
+                                    com.example.service.conversation.ChatMessage(
+                                        sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                                        text = question,
+                                        suggestedReplies = listOf("صبح", "عصر")
+                                    )
+                                )
+                            }
+                        }
+                        if (ambiguousTask != null) {
+                            val hour = ambiguousTask.timeText.substringBefore(":")
+                            val question = ambiguousTask.clarificationQuestion
+                                ?: "برای «${ambiguousTask.title}» منظورتان ساعت $hour صبح است یا عصر؟"
+                            _conversationState.value = _conversationState.value.copy(
+                                activeIntent = com.example.service.conversation.ConversationIntent.CREATE_REMINDER,
+                                slotStatus = com.example.service.conversation.SlotFillingStatus.COLLECTING_SLOTS,
+                                awaitingField = com.example.service.conversation.AwaitingField.AMBIGUOUS_HOUR_AM_PM,
+                                draftTask = ambiguousTask,
+                                lastAssistantQuestion = question
+                            )
                         }
                         _chatMessages.value = _chatMessages.value + previewMessages
-                        ttsSpeaker.speak("چند یادآور جداگانه شناسایی کردم. لطفاً هرکدام را بررسی و تأیید کنید.")
+                        ttsSpeaker.speak(
+                            if (ambiguousTask == null) "چند یادآور جداگانه شناسایی کردم. لطفاً هرکدام را بررسی و تأیید کنید."
+                            else "چند یادآور جداگانه شناسایی کردم. برای یکی از ساعت‌ها لطفاً صبح یا عصر را مشخص کنید."
+                        )
                         return@launch
                     }
                 }
@@ -403,18 +437,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             secondaryActionLabel = "لغو",
                             statusMessage = confirmReply
                         )
+                        val pendingClarification = _conversationState.value.awaitingField !=
+                            com.example.service.conversation.AwaitingField.NONE &&
+                            _conversationState.value.draftTask != null
                         _conversationState.value = _conversationState.value.copy(
-                            slotStatus = if (result.success) {
+                            slotStatus = if (pendingClarification) {
+                                com.example.service.conversation.SlotFillingStatus.COLLECTING_SLOTS
+                            } else if (result.success) {
                                 com.example.service.conversation.SlotFillingStatus.COMPLETED
                             } else {
                                 com.example.service.conversation.SlotFillingStatus.AWAITING_CONFIRMATION
                             },
-                            awaitingField = if (result.success) {
+                            awaitingField = if (pendingClarification) {
+                                _conversationState.value.awaitingField
+                            } else if (result.success) {
                                 com.example.service.conversation.AwaitingField.NONE
                             } else {
                                 com.example.service.conversation.AwaitingField.EXECUTION_CONFIRMATION
                             },
-                            draftTask = if (result.success) null else task,
+                            draftTask = if (pendingClarification) _conversationState.value.draftTask
+                                else if (result.success) null else task,
+                            lastAssistantQuestion = if (pendingClarification) _conversationState.value.lastAssistantQuestion else null,
                             lastMentionedReminderId = if (result.success) entity?.id else _conversationState.value.lastMentionedReminderId
                         )
                         val assistantMsg = com.example.service.conversation.ChatMessage(
