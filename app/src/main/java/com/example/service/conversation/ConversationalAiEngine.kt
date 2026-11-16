@@ -67,6 +67,9 @@ class ConversationalAiEngine(
             currentState
         }
 
+        // Calendar questions are deterministic and must work without network or Gemini.
+        answerCalendarQuestion(cleanInput, turnState, referenceTimeMillis, timeZone)?.let { return it }
+
         // 1. Check if user is responding to an active pending question
         if (turnState.isWaitingForAnswer()) {
             val pendingResolution = handlePendingAnswer(cleanInput, turnState, referenceTimeMillis, timeZone)
@@ -172,10 +175,83 @@ class ConversationalAiEngine(
         val clean = input.trim().lowercase()
         if (isQueryRemindersIntent(clean)) return true
         val questionMarkers = listOf(
-            "چند شنبه", "چه روزی", "چرا", "چطور", "چگونه",
+            "چند شنبه", "چندشنبه", "روز هفته", "چه روزی", "چندم ماه", "چندمه",
+            "تاریخ چنده", "تاریخ امروز", "چرا", "چطور", "چگونه",
             "چیست", "چیه", "کجا", "چه کسی", "کی هست", "چه خبر"
         )
         return questionMarkers.any(clean::contains)
+    }
+
+    /**
+     * Answers calendar/date questions locally. These questions do not require Gemini
+     * and must never be interpreted as reminder creation.
+     */
+    private fun answerCalendarQuestion(
+        input: String,
+        state: ConversationState,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): ConversationalResponse? {
+        val normalized = input.trim()
+            .lowercase()
+            .replace('ي', 'ی')
+            .replace('ك', 'ک')
+            .replace('‌', ' ')
+
+        val asksWeekday = normalized.contains("چند شنبه") ||
+            normalized.contains("چندشنبه") ||
+            normalized.contains("روز هفته") ||
+            normalized.contains("چه روزی از هفته")
+
+        val asksDate = normalized.contains("چندم ماه") ||
+            normalized.contains("چندمه") ||
+            normalized.contains("تاریخ چنده") ||
+            normalized.contains("تاریخ امروز") ||
+            normalized.contains("تاریخ فردا") ||
+            normalized.contains("تاریخ پس فردا")
+
+        if (!asksWeekday && !asksDate) return null
+
+        val dayOffset = when {
+            normalized.contains("پس فردا") || normalized.contains("پسفردا") -> 2
+            normalized.contains("فردا") -> 1
+            else -> 0
+        }
+        val targetCalendar = Calendar.getInstance(timeZone).apply {
+            timeInMillis = referenceTimeMillis
+            add(Calendar.DAY_OF_YEAR, dayOffset)
+        }
+        val targetTimestamp = targetCalendar.timeInMillis
+        val jalaliDate = PersianDateEngine.timestampToJalali(targetTimestamp, timeZone)
+        val weekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)
+        val dayLabel = when (dayOffset) {
+            1 -> "فردا"
+            2 -> "پس‌فردا"
+            else -> "امروز"
+        }
+        val dateText = jalaliDate.formatFullDate()
+
+        val reply = when {
+            asksWeekday && asksDate -> "$dayLabel $weekday است و تاریخ آن $dateText است."
+            asksWeekday -> "$dayLabel $weekday است."
+            else -> "$dayLabel، $dateText است."
+        }
+
+        return ConversationalResponse(
+            replyText = reply,
+            newState = state.copy(
+                activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                awaitingField = AwaitingField.NONE,
+                slotStatus = SlotFillingStatus.IDLE,
+                draftTask = null,
+                lastAssistantQuestion = null,
+                targetReminderId = null,
+                candidateReminderIds = emptyList(),
+                pendingRescheduleDirection = null,
+                pendingRescheduleOffsetMinutes = null
+            ),
+            suggestedReplies = listOf("فردا چند شنبه است؟", "تاریخ امروز چیست؟")
+        )
     }
 
     /**
