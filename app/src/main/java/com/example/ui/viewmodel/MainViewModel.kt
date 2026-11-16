@@ -295,8 +295,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (!_conversationState.value.isWaitingForAnswer()) {
                     val multiTasks = LocalPersianParser.parse(clean)
                     val isReminderRequest = conversationalEngine.shouldRouteAsReminderAction(clean)
-                    val everyTaskHasTimeCue = multiTasks.all { it.hasExplicitDate || it.hasExplicitTime }
-                    if (multiTasks.size > 1 && isReminderRequest && everyTaskHasTimeCue) {
+                    if (multiTasks.size > 1 && isReminderRequest) {
                         pendingMultiReminderTasks.clear()
                         pendingMultiReminderTasks.addAll(multiTasks)
                         presentNextMultiReminder()
