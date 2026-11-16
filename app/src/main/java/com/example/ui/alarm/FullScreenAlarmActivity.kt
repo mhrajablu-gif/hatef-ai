@@ -68,7 +68,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -327,7 +327,7 @@ fun FullScreenAlarmScreen(
                     OutlinedTextField(
                         value = customSnoozeDuration,
                         onValueChange = {
-                            customSnoozeDuration = PersianDateEngine.toEnglishDigits(it.filter(Char::isDigit)).take(5)
+                            customSnoozeDuration = PersianDateEngine.toEnglishDigits(it.filter { digit -> digit.isDigit() }).take(5)
                             customSnoozeError = false
                         },
                         label = { Text("مدت دلخواه") },
