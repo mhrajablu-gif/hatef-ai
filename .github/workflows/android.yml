@@ -51,19 +51,19 @@ jobs:
           echo "Stable keystore SHA-256: $KEYSTORE_CERT_SHA256"
           echo "KEYSTORE_CERT_SHA256=$KEYSTORE_CERT_SHA256" >> "$GITHUB_ENV"
 
-      # Gemini requires Firebase AI Logic configuration for the side-by-side package.
-      # Add a Firebase Android app for com.aistudio.hatefassistant.pxkrmq.safe and store
-      # its google-services.json contents in the GOOGLE_SERVICES_JSON_SAFE repository secret.
-      - name: Restore Firebase configuration for side-by-side app
+      # Gemini requires Firebase AI Logic configuration for the original app package.
+      # Add a Firebase Android app for com.aistudio.hatefassistant.pxkrmq and store
+      # its google-services.json contents in the GOOGLE_SERVICES_JSON repository secret.
+      - name: Restore Firebase configuration for original app
         env:
-          GOOGLE_SERVICES_JSON_SAFE: ${{ secrets.GOOGLE_SERVICES_JSON_SAFE }}
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
         run: |
-          if [ -z "$GOOGLE_SERVICES_JSON_SAFE" ]; then
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
             echo "::warning::Firebase config for the .safe package is not set. Tests will run, but APK creation is intentionally skipped."
             echo "FIREBASE_CONFIG_READY=false" >> "$GITHUB_ENV"
           else
             mkdir -p app
-            printf '%s' "$GOOGLE_SERVICES_JSON_SAFE" > app/google-services.json
+            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
             python3 - <<'PY'
           import json, sys
           with open("app/google-services.json", encoding="utf-8") as f:
@@ -72,11 +72,11 @@ jobs:
               c.get("client_info", {}).get("android_client_info", {}).get("package_name")
               for c in data.get("client", [])
           ]
-          expected = "com.aistudio.hatefassistant.pxkrmq.safe"
+          expected = "com.aistudio.hatefassistant.pxkrmq"
           if expected not in packages:
               print("::error::google-services.json has no client for the .safe application ID.")
               sys.exit(1)
-          print("Firebase configuration matches the side-by-side application ID.")
+          print("Firebase configuration matches the original application ID.")
           PY
             echo "FIREBASE_CONFIG_READY=true" >> "$GITHUB_ENV"
           fi
@@ -133,7 +133,7 @@ jobs:
           PACKAGE_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package: name='([^']+)'.*/\\1/p")"
           VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionCode='([^']+)'.*/\\1/p")"
           VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionName='([^']+)'.*/\\1/p")"
-          test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq.safe"
+          test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq"
           test "$VERSION_CODE" = "29"
           test "$VERSION_NAME" = "1.19.0"
 
