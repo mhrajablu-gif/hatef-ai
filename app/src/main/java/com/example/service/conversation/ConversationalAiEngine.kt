@@ -1830,7 +1830,7 @@ class ConversationalAiEngine(
             "قرص بخورم", "مصرف کنم", "جلسه دارم", "قرار دارم", "امتحان دارم"
         ).any { clean.contains(it) }
         val isNaturalLanguageReminder = hasNaturalTimeCue && hasActionableTask &&
-            !isRoutineOrPersonalStatement &&
+            !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement &&
             !clean.endsWith("?") && !clean.endsWith("؟") &&
             !clean.contains("معمولاً") && !clean.contains("معمولا") &&
             !clean.contains("عادت دارم") && !clean.contains("به نظرت")
@@ -1847,7 +1847,7 @@ class ConversationalAiEngine(
             (localAnalysis.hasExplicitDate || localAnalysis.hasExplicitTime) &&
             !clean.endsWith("?") && !clean.endsWith("؟") &&
             !isConsultationOrAdviceQuestion(clean) &&
-            !isRoutineOrPersonalStatement
+            !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement
 
         if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry ||
             isNaturalLanguageReminder || hasConcreteLocalTask) {
