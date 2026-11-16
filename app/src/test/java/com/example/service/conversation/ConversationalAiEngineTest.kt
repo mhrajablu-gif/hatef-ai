@@ -873,4 +873,14 @@ class ConversationalAiEngineTest {
         assertNull("پیش‌نویس یادآور قبلی نباید به سؤال تقویمی نشت کند", response.newState.draftTask)
         assertTrue(response.replyText.contains("دوشنبه"))
     }
+    @Test
+    fun sharedReminderGateAcceptsConcreteMultiTaskAndRejectsCasualStatements() {
+        assertTrue(
+            engine.shouldRouteAsReminderAction("فردا ساعت ۹ به بانک بروم و پس فردا به دکتر زنگ بزنم")
+        )
+        assertFalse(
+            engine.shouldRouteAsReminderAction("فردا خیلی خسته‌ام و پس‌فردا می‌خواهم استراحت کنم")
+        )
+    }
+
 }
