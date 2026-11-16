@@ -2,6 +2,7 @@ package com.example.service.conversation
 
 import com.example.data.engine.PersianDateEngine
 import com.example.data.model.ReminderEntity
+import com.example.service.ai.LocalPersianParser
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -47,7 +48,7 @@ class ConversationalAiEngineTest {
      * دستیار: باید بپرسد چه کاری و چه ساعتی.
      */
     @Test
-    fun test01_IncompleteRequestAndGradualSlotFilling() = runBlocking {
+    fun test01_IncompleteRequestAndNoFalseSuccessWithoutRegistry() = runBlocking {
         var state = ConversationState()
 
         // Turn 1: Incomplete request
@@ -86,8 +87,11 @@ class ConversationalAiEngineTest {
             currentState = state,
             referenceTimeMillis = fixedReferenceMillis
         )
-        assertEquals("وضعیت باید COMPLETED شود", SlotFillingStatus.COMPLETED, turn4.newState.slotStatus)
-        assertTrue("پاسخ نهایی باید شامل تنظیم شدن باشد", turn4.replyText.contains("با موفقیت تنظیم شد"))
+        assertEquals("پس از شکست باید امکان تلاش مجدد حفظ شود", SlotFillingStatus.AWAITING_CONFIRMATION, turn4.newState.slotStatus)
+        assertEquals("پیش‌نویس یادآور نباید از دست برود", "رفتن به بانک", turn4.newState.draftTask?.title)
+        assertEquals("باید دوباره منتظر تأیید بماند", AwaitingField.EXECUTION_CONFIRMATION, turn4.newState.awaitingField)
+        assertTrue("بدون ابزار ثبت، باید صادقانه عدم انجام عملیات را اعلام کند", turn4.replyText.contains("سرویس ثبت یادآور"))
+        assertFalse("نباید موفقیت ساختگی اعلام شود", turn4.replyText.contains("با موفقیت تنظیم شد"))
     }
 
     /**
@@ -325,22 +329,29 @@ class ConversationalAiEngineTest {
         state = turn1.newState
         assertEquals(ConversationIntent.GREETING_OR_CHITCHAT, state.activeIntent)
 
-        // Turn 2
+        // Turn 2: ۹ without AM/PM is ambiguous, so ask before collecting the title.
         val turn2 = engine.processTurn("فردا ساعت ۹ یادم بنداز", state, emptyList(), fixedReferenceMillis)
         state = turn2.newState
+        assertEquals(AwaitingField.AMBIGUOUS_HOUR_AM_PM, state.awaitingField)
+
+        // Turn 3: Resolve the AM/PM ambiguity.
+        val turn3 = engine.processTurn("صبح", state, emptyList(), fixedReferenceMillis)
+        state = turn3.newState
         assertEquals(AwaitingField.TITLE, state.awaitingField)
 
-        // Turn 3
-        val turn3 = engine.processTurn("جلسه با تیم فنی", state, emptyList(), fixedReferenceMillis)
-        state = turn3.newState
+        // Turn 4: Supply the task title.
+        val turn4 = engine.processTurn("جلسه با تیم فنی", state, emptyList(), fixedReferenceMillis)
+        state = turn4.newState
         assertEquals(AwaitingField.EXECUTION_CONFIRMATION, state.awaitingField)
         assertEquals("جلسه با تیم فنی", state.draftTask?.title)
         assertEquals("۰۹:۰۰", state.draftTask?.timeText)
 
-        // Turn 4
-        val turn4 = engine.processTurn("آره درسته ثبت کن", state, emptyList(), fixedReferenceMillis)
-        assertEquals(SlotFillingStatus.COMPLETED, turn4.newState.slotStatus)
-        assertTrue(turn4.replyText.contains("با موفقیت تنظیم شد"))
+        // Turn 5: The test engine has no database tool, so it must report failure honestly.
+        val turn5 = engine.processTurn("آره درسته ثبت کن", state, emptyList(), fixedReferenceMillis)
+        assertEquals(SlotFillingStatus.AWAITING_CONFIRMATION, turn5.newState.slotStatus)
+        assertTrue(turn5.replyText.contains("سرویس ثبت یادآور"))
+        assertNotNull("پیش‌نویس باید برای تلاش مجدد حفظ شود", turn5.newState.draftTask)
+        assertFalse(turn5.replyText.contains("با موفقیت تنظیم شد"))
     }
 
     /**
@@ -540,5 +551,326 @@ class ConversationalAiEngineTest {
         assertEquals("نیت باید INFORMATIONAL_QA باشد", ConversationIntent.INFORMATIONAL_QA, turn2.newState.activeIntent)
         assertTrue("پاسخ باید توضیح علمی پراکندگی نور باشد", turn1.replyText.isNotBlank())
     }
-}
 
+
+    @Test
+    fun test23_BulkDeleteWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "همه یادآورهام رو حذف کن",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertFalse("حذف گروهی بدون ابزار نباید موفق باشد", turn.executedResult?.success ?: true)
+        assertTrue("باید نبود سرویس را اعلام کند: ${turn.replyText}", turn.replyText.contains("سرویس یادآورها"))
+        assertFalse("نباید پیام حذف موفق بدهد: ${turn.replyText}", turn.replyText.contains("حذف شدند"))
+    }
+
+    @Test
+    fun test24_RescheduleWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "نیم ساعت جلو بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(SlotFillingStatus.IDLE, turn.newState.slotStatus)
+        assertTrue("باید عدم انجام تغییر را اعلام کند: ${turn.replyText}", turn.replyText.contains("تغییر زمان انجام نشد"))
+        assertFalse(turn.replyText.contains("جلو کشیده شد"))
+    }
+
+    @Test
+    fun test25_ChangeHourWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "ساعت قرار رو بکن ۱۰",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue("باید نبود سرویس را اعلام کند: ${turn.replyText}", turn.replyText.contains("سرویس یادآورها در دسترس نیست"))
+        assertFalse(turn.replyText.contains("تغییر یافت"))
+    }
+
+    @Test
+    fun test26_AdvanceAlertWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "برای همین قرار نیم ساعت قبل هم اعلان بذار",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue("نباید ادعای تنظیم پیش‌اعلان کند: ${turn.replyText}", turn.replyText.contains("پیش‌اعلان تنظیم نشد"))
+    }
+
+    @Test
+    fun test27_CancelAlarmWithoutRegistryNeverReportsSuccess() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "یادآور رو لغو کن ولی قرار رو نگه دار",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue("نباید ادعای لغو آلارم کند: ${turn.replyText}", turn.replyText.contains("آلارم لغو نشد"))
+    }
+
+    @Test
+    fun test13_TimeOnlyRequestMustAskForDateBeforeConfirmation() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "ساعت ۱۰ صبح یادم بنداز برم بانک",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.TIME_OR_DATE, turn.newState.awaitingField)
+        assertFalse(turn.newState.draftTask?.hasExplicitDate ?: true)
+        assertTrue(turn.newState.draftTask?.hasExplicitTime ?: false)
+        assertNull(turn.actionCard)
+    }
+
+    @Test
+    fun test14_DateOnlyRequestMustAskForTimeBeforeConfirmation() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "فردا یادم بنداز برم بانک",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.TIME_OR_DATE, turn.newState.awaitingField)
+        assertTrue(turn.newState.draftTask?.hasExplicitDate ?: false)
+        assertFalse(turn.newState.draftTask?.hasExplicitTime ?: true)
+        assertNull(turn.actionCard)
+    }
+
+    @Test
+    fun test28_RescheduleWithoutDurationAsksInsteadOfGuessing() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "عقب بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.RESCHEDULE_OFFSET, turn.newState.awaitingField)
+        assertEquals(1, turn.newState.pendingRescheduleDirection)
+        assertTrue("باید مقدار جابه‌جایی را بپرسد: ${turn.replyText}", turn.replyText.contains("چند دقیقه"))
+    }
+
+    @Test
+    fun test29_RescheduleDurationFollowupNeverClaimsWithoutRegistry() = runBlocking {
+        val first = engine.processTurn(
+            userInput = "عقب بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        val second = engine.processTurn(
+            userInput = "نیم ساعت",
+            currentState = first.newState,
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertTrue("نباید بدون ابزار ادعای تغییر زمان کند: ${second.replyText}", second.replyText.contains("سرویس یادآورها در دسترس نیست"))
+        assertEquals(AwaitingField.NONE, second.newState.awaitingField)
+    }
+
+    @Test
+    fun test30_AdvanceEarlierWithoutDurationAsksInsteadOfGuessing() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "جلو بنداز",
+            currentState = ConversationState(lastMentionedReminderId = 99L),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.RESCHEDULE_OFFSET, turn.newState.awaitingField)
+        assertEquals(-1, turn.newState.pendingRescheduleDirection)
+        assertTrue("باید مقدار جابه‌جایی را بپرسد: ${turn.replyText}", turn.replyText.contains("چند دقیقه"))
+    }
+
+    @Test
+    fun naturalTimedTaskWithoutReminderPhraseEntersReminderFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "فردا ساعت ۱۰ ورزش کنم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull("درخواست باید به پیش‌نویس یادآور تبدیل شود", turn.newState.draftTask)
+        assertFalse("نباید پاسخ عمومی کلیشه‌ای برگردد", turn.replyText.contains("من سوال یا دیدگاه شما را بررسی کردم"))
+    }
+
+    @Test
+    fun declarativeFuturePlanDoesNotCreateReminderWithoutExplicitIntent() {
+        val classifier = ConversationalAiEngine::class.java
+            .getDeclaredMethod("isAppointmentOrReminderAction", String::class.java)
+            .apply { isAccessible = true }
+        val isReminder = classifier.invoke(engine, "فردا می‌خواهم مطالعه کنم") as Boolean
+        assertFalse("اعلام برنامه شخصی نباید به‌عنوان درخواست یادآور تفسیر شود", isReminder)
+    }
+
+    @Test
+    fun obligationWithDateAndTimeCreatesReminderWithoutReminderPhrase() = runBlocking {
+        val input = "فردا ساعت ۳ بعدازظهر باید برم استخر"
+        val turn = engine.processTurn(
+            userInput = input,
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals("بیان الزام و کار مشخص باید وارد مسیر یادآوری شود", ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull("باید پیش‌نویس یادآور ساخته شود", turn.newState.draftTask)
+        assertTrue("عنوان باید رفتن به استخر را حفظ کند: ${turn.newState.draftTask?.title}", turn.newState.draftTask?.title?.contains("استخر") == true)
+        assertEquals("ساعت ۳ بعدازظهر باید به ۱۵ تبدیل شود", 15, PersianDateEngine.timestampToJalali(turn.newState.draftTask!!.triggerTimestamp, tehranTimeZone).hour)
+        assertEquals(AwaitingField.EXECUTION_CONFIRMATION, turn.newState.awaitingField)
+        assertNotNull("پیش از ثبت باید کارت تأیید نمایش داده شود", turn.actionCard)
+    }
+
+    @Test
+    fun weekdayQuestionIsNotTreatedAsReminderRequest() {
+        val classifier = ConversationalAiEngine::class.java
+            .getDeclaredMethod("isAppointmentOrReminderAction", String::class.java)
+            .apply { isAccessible = true }
+        val isReminder = classifier.invoke(engine, "امروز چند شنبه است؟") as Boolean
+        assertFalse("پرسش درباره روز هفته نباید یادآور بسازد", isReminder)
+    }
+
+    @Test
+    fun recurringTimedTaskWithoutReminderPhraseEntersReminderFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "هر روز ساعت ۱۰ صبح ورزش کنم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertNotNull(turn.newState.draftTask)
+        assertEquals("DAILY", turn.newState.draftTask?.repeatType)
+    }
+
+    @Test
+    fun unrelatedReminderQueryInterruptsPendingTimeClarification() = runBlocking {
+        val draft = com.example.service.ai.ParsedTask(
+            title = "جلسه کاری",
+            triggerTimestamp = fixedReferenceMillis + 86_400_000L,
+            jalaliDateText = "۱۴۰۵/۰۸/۰۵",
+            timeText = "۱۰:۰۰",
+            hasExplicitTitle = true,
+            hasExplicitTime = false,
+            hasExplicitDate = true
+        )
+        val waitingState = ConversationState(
+            activeIntent = ConversationIntent.CREATE_REMINDER,
+            draftTask = draft,
+            awaitingField = AwaitingField.TIME_OR_DATE,
+            slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+            lastAssistantQuestion = "یادآوری را چه ساعتی تنظیم کنم؟"
+        )
+
+        val response = engine.processTurn(
+            userInput = "چه یادآورهایی دارم؟",
+            currentState = waitingState,
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(AwaitingField.NONE, response.newState.awaitingField)
+        assertNull("پیش‌نویس قدیمی نباید به پرسش جدید نشت کند", response.newState.draftTask)
+        assertTrue(response.replyText.contains("هیچ یادآور فعالی"))
+    }
+
+
+    @Test
+    fun questionPunctuationAloneDoesNotInterruptClarification() {
+        val detector = ConversationalAiEngine::class.java
+            .getDeclaredMethod("isTopicSwitchQuestion", String::class.java)
+            .apply { isAccessible = true }
+
+        assertFalse("پاسخ کوتاه «صبح؟» نباید موضوع مکالمه را عوض کند", detector.invoke(engine, "صبح؟") as Boolean)
+        assertTrue("پرسش مستقل درباره روز هفته باید موضوع را عوض کند", detector.invoke(engine, "امروز چند شنبه است؟") as Boolean)
+    }
+
+
+
+    @Test
+    fun naturalTaskWithDateAndTimeIsRecognizedWithoutReminderImperative() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "فردا ساعت ۹ تماس با همکار",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertNotNull("باید پیش‌نویس یادآوری ساخته شود", turn.newState.draftTask)
+        assertEquals("تماس با همکار", turn.newState.draftTask?.title)
+        assertEquals("۰۹:۰۰", turn.newState.draftTask?.timeText)
+        assertTrue("باید منتظر تأیید یا رفع ابهام بماند", turn.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun multiReminderItemsInheritSharedDateAndRelativeDurationIsComplete() {
+        val tasks = LocalPersianParser.parse(
+            "فردا ساعت ۹ تماس با مدیر و ساعت ۱۲ خرید نان",
+            fixedReferenceMillis
+        )
+        assertEquals("باید دو کار جدا استخراج شوند", 2, tasks.size)
+        assertTrue("کار دوم باید تاریخ اعلام‌شده برای فهرست را به ارث ببرد", tasks[1].hasExplicitDate)
+        assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
+        assertEquals("۱۲:۰۰", tasks[1].timeText)
+
+        val relative = LocalPersianParser.parse("یک ربع دیگه تماس با همکار", fixedReferenceMillis).single()
+        assertTrue("مدت نسبی باید تاریخ و ساعت را مشخص کند", relative.hasExplicitDate && relative.hasExplicitTime)
+    }
+
+    @Test
+    fun calendarQuestionsAreAnsweredLocallyForTodayAndTomorrow() = runBlocking {
+        val today = engine.processTurn(
+            userInput = "امروز چند شنبه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.INFORMATIONAL_QA, today.newState.activeIntent)
+        assertTrue("پاسخ روز هفته باید محلی و دقیق باشد: ${today.replyText}", today.replyText.contains("دوشنبه"))
+        assertNull("پرسش تقویمی نباید یادآور بسازد", today.newState.draftTask)
+
+        val tomorrow = engine.processTurn(
+            userInput = "فردا چند شنبه است؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertEquals(ConversationIntent.INFORMATIONAL_QA, tomorrow.newState.activeIntent)
+        assertTrue("روز هفته فردا باید سه‌شنبه باشد: ${tomorrow.replyText}", tomorrow.replyText.contains("سه‌شنبه"))
+        assertNull("پرسش درباره فردا نباید یادآور بسازد", tomorrow.newState.draftTask)
+
+        val date = engine.processTurn(
+            userInput = "امروز چندمه؟",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+        assertTrue("تاریخ شمسی باید در پاسخ باشد: ${date.replyText}", date.replyText.contains("آبان"))
+        assertTrue(date.replyText.contains("۱۴۰۵"))
+    }
+
+    @Test
+    fun calendarQuestionCancelsUnrelatedPendingReminderClarification() = runBlocking {
+        val pending = ConversationState(
+            activeIntent = ConversationIntent.CREATE_REMINDER,
+            draftTask = com.example.service.ai.ParsedTask(
+                title = "جلسه",
+                description = "جلسه",
+                rawTimePhrase = "فردا",
+                triggerTimestamp = fixedReferenceMillis + 86_400_000L,
+                jalaliDateText = "۱۴۰۵/۰۸/۰۵",
+                timeText = "۱۰:۰۰",
+                hasExplicitTitle = true,
+                hasExplicitDate = true
+            ),
+            awaitingField = AwaitingField.TIME_OR_DATE,
+            slotStatus = SlotFillingStatus.COLLECTING_SLOTS,
+            lastAssistantQuestion = "چه ساعتی؟"
+        )
+
+        val response = engine.processTurn(
+            userInput = "امروز چند شنبه است؟",
+            currentState = pending,
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(ConversationIntent.INFORMATIONAL_QA, response.newState.activeIntent)
+        assertEquals(AwaitingField.NONE, response.newState.awaitingField)
+        assertNull("پیش‌نویس یادآور قبلی نباید به سؤال تقویمی نشت کند", response.newState.draftTask)
+        assertTrue(response.replyText.contains("دوشنبه"))
+    }
+}

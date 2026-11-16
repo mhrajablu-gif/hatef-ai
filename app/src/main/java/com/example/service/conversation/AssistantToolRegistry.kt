@@ -29,17 +29,35 @@ class AssistantToolRegistry(
     private val defaultTimeZone: TimeZone = TimeZone.getTimeZone("Asia/Tehran")
 ) {
 
+    private fun alarmSchedulingWarning(result: com.example.service.alarm.AlarmScheduleResult, title: String): String? = when (result) {
+        com.example.service.alarm.AlarmScheduleResult.SCHEDULED -> null
+        com.example.service.alarm.AlarmScheduleResult.PARTIALLY_SCHEDULED -> "اطلاعات «$title» ذخیره شد، اما پیش‌اعلان آن تنظیم نشد."
+        com.example.service.alarm.AlarmScheduleResult.ALREADY_DUE -> "اطلاعات «$title» ذخیره شد، اما زمان آن گذشته است و آلارمی تنظیم نشد."
+        com.example.service.alarm.AlarmScheduleResult.EXACT_ALARM_PERMISSION_REQUIRED -> "اطلاعات «$title» ذخیره شد، اما زنگ آن تنظیم نشد؛ مجوز هشدار دقیق را از تنظیمات برنامه فعال کن."
+        com.example.service.alarm.AlarmScheduleResult.ALARM_SERVICE_UNAVAILABLE,
+        com.example.service.alarm.AlarmScheduleResult.FAILED -> "اطلاعات «$title» ذخیره شد، اما زمان‌بندی زنگ ناموفق بود؛ مجوزهای هشدار را بررسی کن."
+    }
+
     /**
      * Tool 1: Create a new reminder / appointment in Room DB and schedule exact alarm.
      */
     suspend fun createReminder(task: ParsedTask): ToolResult {
-        if (task.title.isBlank()) {
+        if (!task.hasExplicitTitle || task.title.isBlank()) {
             return ToolResult(
                 success = false,
-                message = "عنوان یادآور نمی‌تواند خالی باشد.",
+                message = "عنوان یادآور هنوز مشخص نشده است؛ لطفاً عنوان دقیق را بپرسید. هیچ یادآوری ذخیره نشد.",
                 errorCode = "MISSING_TITLE"
             )
         }
+
+        if (!task.hasExplicitDate || !task.hasExplicitTime || task.isAmbiguous || task.hasAmbiguousTimePeriod) {
+            return ToolResult(
+                success = false,
+                message = "تاریخ و ساعت یادآور هنوز به‌طور کامل مشخص نشده‌اند. ابتدا اطلاعات ناقص را از کاربر بپرسید؛ هیچ یادآوری ذخیره نشد.",
+                errorCode = "INCOMPLETE_DATE_TIME"
+            )
+        }
+
 
         if (task.triggerTimestamp <= 0) {
             return ToolResult(
@@ -81,7 +99,7 @@ class AssistantToolRegistry(
         return try {
             val id = repository.insert(entity)
             val savedEntity = entity.copy(id = id)
-            AlarmScheduler.scheduleReminder(context, savedEntity)
+            val alarmWarning = alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, savedEntity), savedEntity.title)
 
             // Check for close time conflicts
             val conflict = repository.findConflictingReminder(task.triggerTimestamp, excludeId = id)
@@ -91,7 +109,7 @@ class AssistantToolRegistry(
 
             ToolResult(
                 success = true,
-                message = "یادآور «${savedEntity.title}» برای $finalDateText ساعت $finalTimeText با موفقیت ثبت شد$conflictNote.",
+                message = (alarmWarning ?: "یادآور «${savedEntity.title}» برای $finalDateText ساعت $finalTimeText با موفقیت ثبت شد$conflictNote.") + if (alarmWarning != null) conflictNote else "", 
                 data = savedEntity
             )
         } catch (e: Exception) {
@@ -210,14 +228,16 @@ class AssistantToolRegistry(
 
         return try {
             repository.update(updated)
-            // Re-schedule alarm to apply any time or advance alert updates
-            AlarmScheduler.cancelReminder(context, id)
-            if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
-                AlarmScheduler.scheduleReminder(context, updated)
+            // Re-schedule alarm to apply any time or advance-alert updates.
+            val alarmWarning = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
+                alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
+            } else {
+                AlarmScheduler.cancelReminder(context, id)
+                null
             }
             ToolResult(
                 success = true,
-                message = "یادآور «${updated.title}» با موفقیت ویرایش و اعلان آن به‌روزرسانی شد.",
+                message = alarmWarning ?: "یادآور «${updated.title}» با موفقیت ویرایش و اعلان آن به‌روزرسانی شد.",
                 data = updated
             )
         } catch (e: Exception) {
@@ -272,9 +292,8 @@ class AssistantToolRegistry(
                 timeText = finalTime,
                 isCompleted = false
             )
-            // Reschedule alarm
-            AlarmScheduler.cancelReminder(context, id)
-            AlarmScheduler.scheduleReminder(context, updated)
+            // Reschedule alarm and report permission failures without claiming it was set.
+            val alarmWarning = alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
 
             val desc = if (offsetMinutes != null) {
                 if (offsetMinutes > 0) "$offsetMinutes دقیقه به تعویق افتاد" else "${-offsetMinutes} دقیقه جلو کشیده شد"
@@ -284,7 +303,7 @@ class AssistantToolRegistry(
 
             ToolResult(
                 success = true,
-                message = "یادآور «${existing.title}» $desc و آلارم آن مجدداً تنظیم گردید.",
+                message = alarmWarning ?: "یادآور «${existing.title}» $desc و آلارم آن مجدداً تنظیم گردید.",
                 data = updated
             )
         } catch (e: Exception) {
@@ -354,9 +373,11 @@ class AssistantToolRegistry(
         val updated = existing.copy(advanceAlertMinutes = advanceAlertMinutes)
         return try {
             repository.update(updated)
-            AlarmScheduler.cancelReminder(context, id)
-            if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
-                AlarmScheduler.scheduleReminder(context, updated)
+            val alarmWarning = if (!updated.isCompleted && updated.triggerTimestamp > System.currentTimeMillis()) {
+                alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, updated), updated.title)
+            } else {
+                AlarmScheduler.cancelReminder(context, id)
+                null
             }
             val alertDesc = if (advanceAlertMinutes > 0) {
                 "پیش‌اعلان $advanceAlertMinutes دقیقه قبل برای «${updated.title}» فعال شد."
@@ -365,7 +386,7 @@ class AssistantToolRegistry(
             }
             ToolResult(
                 success = true,
-                message = alertDesc,
+                message = alarmWarning ?: alertDesc,
                 data = updated
             )
         } catch (e: Exception) {
@@ -394,7 +415,8 @@ class AssistantToolRegistry(
             if (isCompleted) {
                 AlarmScheduler.cancelReminder(context, id)
             } else if (existing.triggerTimestamp > System.currentTimeMillis()) {
-                AlarmScheduler.scheduleReminder(context, existing.copy(isCompleted = false))
+                val alarmWarning = alarmSchedulingWarning(AlarmScheduler.scheduleReminder(context, existing.copy(isCompleted = false)), existing.title)
+                if (alarmWarning != null) return ToolResult(success = true, message = alarmWarning, data = existing.copy(isCompleted = false))
             }
             val statusText = if (isCompleted) "انجام‌شده" else "در انتظار انجام"
             ToolResult(
@@ -424,12 +446,16 @@ class AssistantToolRegistry(
             )
         }
 
-        val isScheduled = !rem.isCompleted && rem.triggerTimestamp > System.currentTimeMillis()
-        val alarmStatus = if (isScheduled) "آلارم فعال و زمان‌بندی شده است" else "آلارم غیرفعال یا گذشته است"
+        val hasFuturePendingRecord = !rem.isCompleted && rem.triggerTimestamp > System.currentTimeMillis()
+        val recordStatus = if (hasFuturePendingRecord) {
+            "رکورد یادآور فعال و دارای موعد آینده است"
+        } else {
+            "یادآور تکمیل‌شده یا موعدگذشته است"
+        }
 
         return ToolResult(
             success = true,
-            message = "رکورد «${rem.title}» در پایگاه داده موجود است. وضعیت: $alarmStatus (تاریخ: ${rem.jalaliDateText} ساعت ${rem.timeText}).",
+            message = "رکورد «${rem.title}» در پایگاه داده موجود است. $recordStatus (تاریخ: ${rem.jalaliDateText} ساعت ${rem.timeText}). توجه: از این مسیر نمی‌توان ثبت واقعی PendingIntent در سرویس آلارم اندروید را مستقیماً تأیید کرد؛ وضعیت بالا فقط از روی اطلاعات ذخیره‌شده بررسی شده است.",
             data = rem
         )
     }
