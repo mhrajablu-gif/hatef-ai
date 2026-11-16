@@ -1770,7 +1770,7 @@ class ConversationalAiEngine(
                 clean.contains("سلامتی‌ام") || clean.contains("سلامتیم")
 
         // Routine / personal life statements / stative plans without explicit reminder imperative
-        val isRoutineOrPersonalStatement = clean.contains("امتحان دارم") || clean.contains("کنکور دارم") ||
+        val isRoutineOrPersonalStatement = clean.contains("امتحان") || clean.contains("کنکور") ||
                 clean.contains("درس دارم") || clean.contains("سفر می‌روم") || clean.contains("سفر میرم") ||
                 clean.contains("مسافرت میرم") || clean.contains("مطالعه کنم") || clean.contains("کتاب بخونم") ||
                 clean.contains("بیدار میشم") || clean.contains("بیدار می‌شوم") || clean.contains("بیدار شوم") ||
