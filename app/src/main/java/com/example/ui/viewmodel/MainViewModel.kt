@@ -131,8 +131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             _chatMessages.collect { messages ->
-                chatMessageDao.deleteAll()
-                chatMessageDao.insertAll(messages.map { it.toEntity() })
+                chatMessageDao.replaceAll(messages.map { it.toEntity() })
             }
         }
 
