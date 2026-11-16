@@ -50,17 +50,34 @@ class ConversationalAiEngine(
             )
         }
 
+        // A clear new question must not be consumed as the answer to an unrelated
+        // pending slot (for example, answering "what day is today?" with a reminder title).
+        val turnState = if (currentState.isWaitingForAnswer() && isTopicSwitchQuestion(cleanInput)) {
+            currentState.copy(
+                awaitingField = AwaitingField.NONE,
+                slotStatus = SlotFillingStatus.IDLE,
+                draftTask = null,
+                lastAssistantQuestion = null,
+                targetReminderId = null,
+                candidateReminderIds = emptyList(),
+                pendingRescheduleDirection = null,
+                pendingRescheduleOffsetMinutes = null
+            )
+        } else {
+            currentState
+        }
+
         // 1. Check if user is responding to an active pending question
-        if (currentState.isWaitingForAnswer()) {
-            val pendingResolution = handlePendingAnswer(cleanInput, currentState, referenceTimeMillis, timeZone)
+        if (turnState.isWaitingForAnswer()) {
+            val pendingResolution = handlePendingAnswer(cleanInput, turnState, referenceTimeMillis, timeZone)
             if (pendingResolution != null) {
                 return pendingResolution
             }
         }
 
         // 2. Check for explicit corrections to previous statements ("نه، منظورم فردا نبود، پسفردا بود")
-        if (isCorrection(cleanInput) && currentState.draftTask != null) {
-            return handleCorrection(cleanInput, currentState, referenceTimeMillis, timeZone)
+        if (isCorrection(cleanInput) && turnState.draftTask != null) {
+            return handleCorrection(cleanInput, turnState, referenceTimeMillis, timeZone)
         }
 
         // 3. Greetings and casual conversation are routed to the conversational model
@@ -75,7 +92,7 @@ class ConversationalAiEngine(
             )
             return ConversationalResponse(
                 replyText = advisoryReply,
-                newState = currentState.copy(
+                newState = turnState.copy(
                     activeIntent = ConversationIntent.CONSULTATION_OR_ADVICE,
                     awaitingField = AwaitingField.NONE,
                     slotStatus = SlotFillingStatus.IDLE
@@ -85,31 +102,31 @@ class ConversationalAiEngine(
         }
 
         // 5. Check for user routine / habit declarations ("من معمولاً ساعت ۸ صبح بیدار میشم")
-        val routineResponse = handleUserRoutineStatement(cleanInput, currentState)
+        val routineResponse = handleUserRoutineStatement(cleanInput, turnState)
         if (routineResponse != null) {
             return routineResponse
         }
 
         // 6. Check for application setting commands ("از این به بعد ۱۵ دقیقه قبل هم یادآوری کن", "تم رو تاریک کن")
-        val appSettingResponse = handleAppSettingCommand(cleanInput, currentState)
+        val appSettingResponse = handleAppSettingCommand(cleanInput, turnState)
         if (appSettingResponse != null) {
             return appSettingResponse
         }
 
         // 7. Check for references to previous reminders ("اون رو نیم ساعت عقب بنداز", "قرار فردام رو دو ساعت عقب بنداز", "اون قراری که دیروز تنظیم کردیم رو برای هفته بعد ببر", "قرارم رو حذف کن")
-        val referenceAction = handleReferenceToPast(cleanInput, currentState, referenceTimeMillis, timeZone)
+        val referenceAction = handleReferenceToPast(cleanInput, turnState, referenceTimeMillis, timeZone)
         if (referenceAction != null) {
             return referenceAction
         }
 
         // 8. Check for questions about existing reminders ("چه یادآورهایی دارم؟", "قرارهای این هفته")
         if (isQueryRemindersIntent(cleanInput)) {
-            return handleQueryReminders(cleanInput, currentState, referenceTimeMillis, timeZone)
+            return handleQueryReminders(cleanInput, turnState, referenceTimeMillis, timeZone)
         }
 
         // 9. Check if input is a Reminder / Appointment Action
         if (isAppointmentOrReminderAction(cleanInput)) {
-            return handleAppointmentOrReminderAction(cleanInput, currentState, referenceTimeMillis, timeZone)
+            return handleAppointmentOrReminderAction(cleanInput, turnState, referenceTimeMillis, timeZone)
         }
 
         // 10. General AI Conversational Assistant (Gemini)
@@ -144,6 +161,21 @@ class ConversationalAiEngine(
             ),
             suggestedReplies = listOf("فردا ۱۰ صبح یادم بنداز برم بانک", "یادآورهای امروز", "هوش مصنوعی چطور کار می‌کنه؟")
         )
+    }
+
+    /**
+     * Detects an explicit question that starts a new topic rather than answering
+     * the currently requested reminder slot. Short answers such as "صبح" or
+     * "فردا" intentionally do not match these markers.
+     */
+    private fun isTopicSwitchQuestion(input: String): Boolean {
+        val clean = input.trim().lowercase()
+        if (isQueryRemindersIntent(clean)) return true
+        val questionMarkers = listOf(
+            "؟", "?", "چند شنبه", "چه روزی", "چرا", "چطور", "چگونه",
+            "چیست", "چیه", "کجا", "چه کسی", "کی هست", "چه خبر"
+        )
+        return questionMarkers.any(clean::contains)
     }
 
     /**
