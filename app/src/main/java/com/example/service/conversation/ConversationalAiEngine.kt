@@ -172,7 +172,7 @@ class ConversationalAiEngine(
         val clean = input.trim().lowercase()
         if (isQueryRemindersIntent(clean)) return true
         val questionMarkers = listOf(
-            "؟", "?", "چند شنبه", "چه روزی", "چرا", "چطور", "چگونه",
+            "چند شنبه", "چه روزی", "چرا", "چطور", "چگونه",
             "چیست", "چیه", "کجا", "چه کسی", "کی هست", "چه خبر"
         )
         return questionMarkers.any(clean::contains)
