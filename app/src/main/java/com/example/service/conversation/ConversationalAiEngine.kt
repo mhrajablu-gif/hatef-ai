@@ -142,7 +142,7 @@ class ConversationalAiEngine(
             val isGreeting = checkChitChatOrGreeting(cleanInput) != null
             return ConversationalResponse(
                 replyText = generalReply,
-                newState = currentState.copy(
+                newState = turnState.copy(
                     activeIntent = if (isGreeting) ConversationIntent.GREETING_OR_CHITCHAT else ConversationIntent.INFORMATIONAL_QA,
                     awaitingField = AwaitingField.NONE,
                     slotStatus = SlotFillingStatus.IDLE
@@ -154,7 +154,7 @@ class ConversationalAiEngine(
         // 11. Unrecognized or blank
         return ConversationalResponse(
             replyText = "متوجه درخواست شما نشدم؛ لطفاً واضح‌تر بفرمایید، یا بگویید چه کاری و در چه زمانی را مایلید یادتان بیندازم.",
-            newState = currentState.copy(
+            newState = turnState.copy(
                 activeIntent = ConversationIntent.UNKNOWN,
                 awaitingField = AwaitingField.NONE,
                 slotStatus = SlotFillingStatus.IDLE
