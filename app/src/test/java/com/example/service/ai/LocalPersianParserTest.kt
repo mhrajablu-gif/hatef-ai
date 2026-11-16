@@ -32,6 +32,21 @@ class LocalPersianParserTest {
         assertEquals(1, tasks.size)
     }
     @Test
+    fun keepsIncompleteSecondTaskSeparateAndDoesNotInventItsTime() {
+        val input = "فردا ساعت ۹ به بانک بروم و پس فردا به دکتر زنگ بزنم"
+
+        val tasks = LocalPersianParser.parse(input, referenceTimeMillis = 1_794_556_800_000L)
+
+        assertEquals(2, tasks.size)
+        assertTrue(tasks[0].hasExplicitDate)
+        assertTrue(tasks[0].hasExplicitTime)
+        assertTrue(tasks[0].hasExplicitTitle)
+        assertTrue(tasks[1].hasExplicitDate)
+        assertFalse(tasks[1].hasExplicitTime)
+        assertTrue(tasks[1].hasExplicitTitle)
+    }
+
+    @Test
     fun splitsTwoTasksWhenSecondHourNeedsAmPmClarification() {
         val input = "فردا ساعت ۱۸ نون بخرم و ساعت ۵ برم سبزی بخرم"
 
