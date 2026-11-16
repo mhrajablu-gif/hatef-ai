@@ -134,8 +134,8 @@ jobs:
           VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionCode='([^']+)'.*/\\1/p")"
           VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionName='([^']+)'.*/\\1/p")"
           test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq.safe"
-          test "$VERSION_CODE" = "26"
-          test "$VERSION_NAME" = "1.18.7"
+          test "$VERSION_CODE" = "27"
+          test "$VERSION_NAME" = "1.18.8"
 
           VERIFY_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
           printf '%s\n' "$VERIFY_OUTPUT"
@@ -154,8 +154,8 @@ jobs:
         if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.18.7.apk
-          test -s release/yadet-v1.18.7.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.18.8.apk
+          test -s release/yadet-v1.18.8.apk
           sha256sum release/yadet-v1.18.7.apk
 
       - name: Upload unit test reports
