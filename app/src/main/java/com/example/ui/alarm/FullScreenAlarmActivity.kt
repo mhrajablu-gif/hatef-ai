@@ -327,7 +327,7 @@ fun FullScreenAlarmScreen(
                     OutlinedTextField(
                         value = customSnoozeDuration,
                         onValueChange = {
-                            customSnoozeDuration = it.filter(Char::isDigit).take(5)
+                            customSnoozeDuration = PersianDateEngine.toEnglishDigits(it.filter(Char::isDigit)).take(5)
                             customSnoozeError = false
                         },
                         label = { Text("مدت دلخواه") },
