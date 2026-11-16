@@ -778,4 +778,19 @@ class ConversationalAiEngineTest {
     }
 
 
+
+    @Test
+    fun naturalTaskWithDateAndTimeIsRecognizedWithoutReminderImperative() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "فردا ساعت ۹ تماس با همکار",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertNotNull("باید پیش‌نویس یادآوری ساخته شود", turn.newState.draftTask)
+        assertEquals("تماس با همکار", turn.newState.draftTask?.title)
+        assertEquals("۰۹:۰۰", turn.newState.draftTask?.timeText)
+        assertTrue("باید منتظر تأیید یا رفع ابهام بماند", turn.newState.isWaitingForAnswer())
+    }
 }
