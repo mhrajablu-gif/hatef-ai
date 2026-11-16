@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Calendar
@@ -61,8 +62,23 @@ data class MainUiState(
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
+    private fun com.example.service.conversation.ChatMessage.toEntity() =
+        com.example.data.model.ChatMessageEntity(
+            id = id,
+            sender = sender.name,
+            messageText = text,
+            timestamp = timestamp,
+            suggestedReplies = suggestedReplies.joinToString(CHAT_SUGGESTIONS_SEPARATOR)
+        )
+
+    companion object {
+        private const val CHAT_SUGGESTIONS_SEPARATOR = "\u001F"
+    }
+
+
     private val db = AppDatabase.getDatabase(application)
     private val repository = ReminderRepository(db.reminderDao())
+    private val chatMessageDao = db.chatMessageDao()
     private val speechManager = SpeechManager(application)
     private val aiParser = GeminiSemanticParser()
     private val themePreferences = com.example.ui.theme.ThemePreferences(application)
@@ -92,6 +108,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val themeMode: StateFlow<com.example.ui.theme.ThemeMode> = themePreferences.themeMode
 
     init {
+        // Restore the offline transcript before accepting new chat turns, then persist each
+        // subsequent snapshot. The database migration is additive and leaves reminders intact.
+        viewModelScope.launch {
+            val savedMessages = chatMessageDao.getAllMessages()
+            if (savedMessages.isNotEmpty()) {
+                _chatMessages.value = savedMessages.map { saved ->
+                    com.example.service.conversation.ChatMessage(
+                        id = saved.id,
+                        sender = runCatching {
+                            com.example.service.conversation.MessageSender.valueOf(saved.sender)
+                        }.getOrDefault(com.example.service.conversation.MessageSender.ASSISTANT),
+                        text = saved.messageText,
+                        timestamp = saved.timestamp,
+                        suggestedReplies = saved.suggestedReplies
+                            .split(CHAT_SUGGESTIONS_SEPARATOR)
+                            .filter { it.isNotBlank() }
+                    )
+                }
+            } else {
+                chatMessageDao.insertAll(listOf(initialWelcomeMessage.toEntity()))
+            }
+
+            _chatMessages.collect { messages ->
+                chatMessageDao.deleteAll()
+                chatMessageDao.insertAll(messages.map { it.toEntity() })
+            }
+        }
+
         viewModelScope.launch {
             speechManager.voiceState.collect { state ->
                 if (state is VoiceState.Success && state.recognizedText.isNotBlank()) {
