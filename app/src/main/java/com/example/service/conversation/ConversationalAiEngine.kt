@@ -1835,7 +1835,22 @@ class ConversationalAiEngine(
             !clean.contains("معمولاً") && !clean.contains("معمولا") &&
             !clean.contains("عادت دارم") && !clean.contains("به نظرت")
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry || isNaturalLanguageReminder) {
+        // Do not require a reminder imperative ("یادم بنداز") when the sentence itself
+        // contains a concrete task and an explicit date/time. Use the same deterministic
+        // local analyzer that extracts the task; questions and advice requests stay in chat.
+        val localAnalysis = PersianCommandAnalyzer.analyze(
+            input, System.currentTimeMillis(), TimeZone.getDefault()
+        )
+        val hasConcreteLocalTask = localAnalysis.title.isNotBlank() &&
+            !isGenericSubject(localAnalysis.title) &&
+            !localAnalysis.title.startsWith("یادآوری ساعت") &&
+            (localAnalysis.hasExplicitDate || localAnalysis.hasExplicitTime) &&
+            !clean.endsWith("?") && !clean.endsWith("؟") &&
+            !isConsultationOrAdviceQuestion(clean) &&
+            !isRoutineOrPersonalStatement
+
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry ||
+            isNaturalLanguageReminder || hasConcreteLocalTask) {
             return true
         }
 
