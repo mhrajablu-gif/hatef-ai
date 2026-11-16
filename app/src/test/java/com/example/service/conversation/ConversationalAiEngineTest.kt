@@ -767,4 +767,15 @@ class ConversationalAiEngineTest {
     }
 
 
+    @Test
+    fun questionPunctuationAloneDoesNotInterruptClarification() {
+        val detector = ConversationalAiEngine::class.java
+            .getDeclaredMethod("isTopicSwitchQuestion", String::class.java)
+            .apply { isAccessible = true }
+
+        assertFalse("پاسخ کوتاه «صبح؟» نباید موضوع مکالمه را عوض کند", detector.invoke(engine, "صبح؟") as Boolean)
+        assertTrue("پرسش مستقل درباره روز هفته باید موضوع را عوض کند", detector.invoke(engine, "امروز چند شنبه است؟") as Boolean)
+    }
+
+
 }
