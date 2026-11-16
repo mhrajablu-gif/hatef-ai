@@ -9,7 +9,7 @@ import com.example.data.model.ChatMessageEntity
 
 @Dao
 interface ChatMessageDao {
-    @Query("SELECT * FROM chat_messages ORDER BY timestamp ASC")
+    @Query("SELECT * FROM chat_messages ORDER BY timestamp ASC, rowid ASC")
     suspend fun getAllMessages(): List<ChatMessageEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
