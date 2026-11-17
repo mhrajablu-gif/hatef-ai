@@ -83,21 +83,10 @@ jobs:
           fi
 
       - name: Prepare Secrets Configuration
-        env:
-          FIREBASE_APPCHECK_DEBUG_TOKEN: ${{ secrets.FIREBASE_APPCHECK_DEBUG_TOKEN }}
         run: |
           if [ ! -f ".env" ] && [ -f ".env.example" ]; then
             cp .env.example .env
             echo "Created .env from .env.example"
-          fi
-          if [ -z "$FIREBASE_APPCHECK_DEBUG_TOKEN" ]; then
-            echo "FIREBASE_APPCHECK_DEBUG_TOKEN_READY=false" >> "$GITHUB_ENV"
-            echo "::warning::Registered Firebase App Check debug token is missing. Tests will run, but no APK will be published."
-          else
-            # Pass the secret to Gradle as an environment variable. The build script
-            # emits it as a correctly quoted Java string literal in BuildConfig.
-            echo "FIREBASE_APPCHECK_DEBUG_TOKEN=$FIREBASE_APPCHECK_DEBUG_TOKEN" >> "$GITHUB_ENV"
-            echo "FIREBASE_APPCHECK_DEBUG_TOKEN_READY=true" >> "$GITHUB_ENV"
           fi
 
       - name: Make Gradle Wrapper Executable
@@ -121,17 +110,17 @@ jobs:
           retention-days: 14
 
       - name: Build APK
-        if: env.FIREBASE_CONFIG_READY == 'true' && env.FIREBASE_APPCHECK_DEBUG_TOKEN_READY == 'true'
+        if: env.FIREBASE_CONFIG_READY == 'true'
         run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
       - name: Verify APK Output
-        if: env.FIREBASE_CONFIG_READY == 'true' && env.FIREBASE_APPCHECK_DEBUG_TOKEN_READY == 'true'
+        if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           ls -lh app/build/outputs/apk/debug/
           test -f app/build/outputs/apk/debug/app-debug.apk
 
       - name: Verify APK package, version, and stable signing certificate
-        if: env.FIREBASE_CONFIG_READY == 'true' && env.FIREBASE_APPCHECK_DEBUG_TOKEN_READY == 'true'
+        if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
@@ -163,7 +152,7 @@ jobs:
           echo "APK package/version and signing certificate match the established update baseline."
 
       - name: Prepare versioned APK filename
-        if: env.FIREBASE_CONFIG_READY == 'true' && env.FIREBASE_APPCHECK_DEBUG_TOKEN_READY == 'true'
+        if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           mkdir -p release
           cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.19.2.apk
@@ -180,7 +169,7 @@ jobs:
           retention-days: 14
 
       - name: Upload APK
-        if: env.FIREBASE_CONFIG_READY == 'true' && env.FIREBASE_APPCHECK_DEBUG_TOKEN_READY == 'true'
+        if: env.FIREBASE_CONFIG_READY == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: yadet-v1.19.2
