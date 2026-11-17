@@ -73,7 +73,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        com.example.service.ai.configureAppCheck(this)
+        com.example.service.ai.configureAppCheck(this, intent)
         enableEdgeToEdge()
 
         // Check if launched from Quick Mic Widget
