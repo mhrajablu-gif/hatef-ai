@@ -81,7 +81,6 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
-  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
 }
 
 // Some unused dependencies are commented out below instead of being removed.
