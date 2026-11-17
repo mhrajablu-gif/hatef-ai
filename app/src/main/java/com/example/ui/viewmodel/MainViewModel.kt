@@ -455,6 +455,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             when (card.type) {
                 com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER -> {
                     card.task?.let { task ->
+                        // A stale card from an earlier queued task must not create a duplicate reminder.
+                        if (pendingMultiReminderTasks.isNotEmpty() &&
+                            !pendingMultiReminderTasks.isFirstSameSource(task)
+                        ) return@launch
                         val result = toolRegistry.createReminder(task)
                         val confirmReply = if (result.success) {
                             result.message
@@ -497,10 +501,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             lastAssistantQuestion = if (pendingClarification) _conversationState.value.lastAssistantQuestion else null,
                             lastMentionedReminderId = if (result.success) entity?.id else _conversationState.value.lastMentionedReminderId
                         )
+                        // Convert the original preview card into a result card so it cannot be
+                        // tapped again to create the same reminder twice.
+                        _chatMessages.value = _chatMessages.value.map { message ->
+                            if (message.actionCard == card) message.copy(actionCard = resultCard) else message
+                        }
                         val assistantMsg = com.example.service.conversation.ChatMessage(
                             sender = com.example.service.conversation.MessageSender.ASSISTANT,
                             text = confirmReply,
-                            actionCard = resultCard,
                             suggestedReplies = if (result.success) listOf("یادآور جدید", "مشاهده یادآورها") else listOf("آره، دوباره ثبت کن", "لغو")
                         )
                         _chatMessages.value = _chatMessages.value + assistantMsg
@@ -562,21 +570,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelActionCard(card: com.example.service.conversation.ConversationActionCard) {
+        val hadQueuedTasks = pendingMultiReminderTasks.isNotEmpty()
+        val cancelledQueuedTask = if (hadQueuedTasks) {
+            card.task?.let { pendingMultiReminderTasks.removeFirstIfSameSource(it) } == true
+        } else false
+        // Ignore an old card after the queue has already advanced to another task.
+        if (hadQueuedTasks && !cancelledQueuedTask) return
+
         _conversationState.value = _conversationState.value.copy(
             slotStatus = com.example.service.conversation.SlotFillingStatus.CANCELLED,
             awaitingField = com.example.service.conversation.AwaitingField.NONE,
             draftTask = null
         )
+        val cancelledCard = card.copy(
+            type = com.example.service.conversation.ActionCardType.EXECUTION_RESULT,
+            primaryActionLabel = "لغو شد",
+            secondaryActionLabel = null,
+            statusMessage = card.task?.let { "یادآور «${it.title}» لغو شد." } ?: "عملیات لغو شد."
+        )
+        _chatMessages.value = _chatMessages.value.map { message ->
+            if (message.actionCard == card) message.copy(actionCard = cancelledCard) else message
+        }
         val cancelMsg = com.example.service.conversation.ChatMessage(
             sender = com.example.service.conversation.MessageSender.ASSISTANT,
             text = "عملیات لغو شد. کار دیگری هست که بتونم براتون انجام بدم؟",
             suggestedReplies = listOf("یادآور جدید", "یادآورهای امروز")
         )
         _chatMessages.value = _chatMessages.value + cancelMsg
-        if (pendingMultiReminderTasks.isNotEmpty()) {
-            pendingMultiReminderTasks.removeFirst()
-            presentNextMultiReminder()
-        }
+        if (cancelledQueuedTask) presentNextMultiReminder()
     }
 
     fun parseSpokenCommand(text: String) {
