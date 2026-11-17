@@ -81,6 +81,8 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
+  // This token is supplied by Firebase SDK at runtime and must not become a BuildConfig field.
+  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
 }
 
 // Some unused dependencies are commented out below instead of being removed.
