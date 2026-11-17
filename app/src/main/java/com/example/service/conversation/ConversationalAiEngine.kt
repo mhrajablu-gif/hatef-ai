@@ -561,6 +561,26 @@ class ConversationalAiEngine(
         val newTs = cal.timeInMillis
         val j = PersianDateEngine.timestampToJalali(newTs, timeZone)
         val timeStr = PersianDateEngine.formatPersianTime(j.hour, j.minute)
+        // ParsedTask retains its original analysis for diagnostics. Remove the resolved
+        // AM/PM ambiguity from that snapshot too, otherwise hasAmbiguousTimePeriod
+        // sees the stale flag and asks the same question again forever.
+        val resolvedAnalysis = draft.analyzedResult?.let { analysis ->
+            val remainingAmbiguities = analysis.ambiguousFields.filterNot { it == "HOUR_PERIOD_AM_PM" }
+            analysis.copy(
+                targetTimestamp = newTs,
+                jalaliDateText = j.formatPersianNumeric(),
+                hour = j.hour,
+                minute = j.minute,
+                ambiguousFields = remainingAmbiguities,
+                validationStatus = if (
+                    analysis.validationStatus == ValidationStatus.AMBIGUOUS && remainingAmbiguities.isEmpty()
+                ) ValidationStatus.VALID else analysis.validationStatus,
+                needsUserClarification = remainingAmbiguities.isNotEmpty(),
+                clarificationQuestion = if (remainingAmbiguities.isEmpty()) null else analysis.clarificationQuestion,
+                quickSuggestions = if (remainingAmbiguities.isEmpty()) emptyList() else analysis.quickSuggestions,
+                hasExplicitTime = true
+            )
+        }
 
         return draft.copy(
             triggerTimestamp = newTs,
@@ -568,7 +588,8 @@ class ConversationalAiEngine(
             timeText = timeStr,
             isAmbiguous = false,
             clarificationQuestion = null,
-            hasExplicitTime = true
+            hasExplicitTime = true,
+            analyzedResult = resolvedAnalysis
         )
     }
 
