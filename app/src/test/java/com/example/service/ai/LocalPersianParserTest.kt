@@ -101,4 +101,42 @@ class LocalPersianParserTest {
     }
 
 
+    @Test
+    fun keepsExplicitMorningOnFirstTaskAndSplitsSecondAmbiguousHour() {
+        val input = "فردا ۸صبح برم خونه ی مامان و ساعت ۱۱ برم باشگاه"
+
+        val tasks = LocalPersianParser.parse(input, referenceTimeMillis = 1_794_556_800_000L)
+
+        assertEquals(2, tasks.size)
+        assertTrue(tasks[0].title.contains("مامان"))
+        assertTrue(tasks[0].hasExplicitDate)
+        assertTrue(tasks[0].hasExplicitTime)
+        assertFalse(tasks[0].hasAmbiguousTimePeriod)
+        assertEquals("۰۸:۰۰", tasks[0].timeText)
+        assertTrue(tasks[1].title.contains("باشگاه"))
+        assertTrue(tasks[1].hasExplicitDate)
+        assertTrue(tasks[1].hasExplicitTime)
+        assertTrue(tasks[1].hasAmbiguousTimePeriod)
+        assertEquals("۱۱:۰۰", tasks[1].timeText)
+    }
+
+    @Test
+    fun splitsSecondTaskWith24HourClockAndVerbBeforeDestination() {
+        val input = "فردا ساعت ۱۴ برم خونه ساعت ۱۶ برم باشگاه"
+
+        val tasks = LocalPersianParser.parse(input, referenceTimeMillis = 1_794_556_800_000L)
+
+        assertEquals(2, tasks.size)
+        assertTrue(tasks[0].title.contains("خونه"))
+        assertEquals("۱۴:۰۰", tasks[0].timeText)
+        assertTrue(tasks[0].hasExplicitDate)
+        assertTrue(tasks[0].hasExplicitTime)
+        assertFalse(tasks[0].hasAmbiguousTimePeriod)
+        assertTrue(tasks[1].title.contains("باشگاه"))
+        assertEquals("۱۶:۰۰", tasks[1].timeText)
+        assertTrue(tasks[1].hasExplicitDate)
+        assertTrue(tasks[1].hasExplicitTime)
+        assertFalse(tasks[1].hasAmbiguousTimePeriod)
+    }
+
 }
