@@ -31,6 +31,7 @@ class PendingReminderQueueTest {
         val queue = PendingReminderQueue()
         queue.addAll(listOf(first, second))
 
+        assertTrue(queue.isFirstSameSource(first))
         assertTrue(queue.replaceFirst(clarified))
         assertEquals(clarified, queue.firstOrNull())
         assertTrue(queue.removeFirstIfSameSource(clarified))
@@ -44,6 +45,8 @@ class PendingReminderQueueTest {
         val queue = PendingReminderQueue()
         queue.addAll(listOf(first, unrelated))
 
+        assertTrue(queue.isFirstSameSource(first))
+        assertFalse(queue.isFirstSameSource(unrelated))
         assertFalse(queue.replaceFirst(unrelated))
         assertEquals(first, queue.firstOrNull())
         assertFalse(queue.removeFirstIfSameSource(unrelated))
