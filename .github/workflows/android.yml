@@ -27,7 +27,6 @@ jobs:
           printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
           python - <<'PY'
           import json
-          import re
           import sys
 
           with open("app/google-services.json", encoding="utf-8") as f:
