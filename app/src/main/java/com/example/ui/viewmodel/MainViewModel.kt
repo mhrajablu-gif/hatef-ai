@@ -346,14 +346,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         type = com.example.service.conversation.ActionCardType.EXECUTION_RESULT,
                         task = draftBeforeTurn,
                         targetReminder = response.executedResult?.data as? ReminderEntity,
-                        statusMessage = resultMessage
+                        primaryActionLabel = if (response.executedResult?.success == true) "انجام شد" else "لغو شد",
+                        secondaryActionLabel = null,
+                        statusMessage = null
                     )
                     _chatMessages.value = _chatMessages.value.map { message ->
                         if (message.actionCard?.type == com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER &&
                             message.actionCard.task == draftBeforeTurn
                         ) {
                             existingPreviewUpdated = true
-                            message.copy(actionCard = resultCard)
+                            message.copy(text = resultMessage, actionCard = resultCard)
                         } else message
                     }
                     if (pendingMultiReminderTasks.removeFirstIfSameSource(draftBeforeTurn)) {
@@ -506,8 +508,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             },
                             targetReminder = entity,
                             primaryActionLabel = if (result.success) "انجام شد" else "تلاش دوباره",
-                            secondaryActionLabel = "لغو",
-                            statusMessage = confirmReply
+                            secondaryActionLabel = if (result.success) null else "لغو",
+                            statusMessage = null
                         )
                         val pendingClarification = _conversationState.value.awaitingField !=
                             com.example.service.conversation.AwaitingField.NONE &&
@@ -536,7 +538,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         // Convert the original preview card into a result card so it cannot be
                         // tapped again to create the same reminder twice.
                         _chatMessages.value = _chatMessages.value.map { message ->
-                            if (message.actionCard == card) message.copy(actionCard = resultCard) else message
+                            if (message.actionCard == card) message.copy(text = confirmReply, actionCard = resultCard) else message
                         }
                         // A successful result is already visible in the converted card.
                         // Add a separate text bubble only when saving failed.
