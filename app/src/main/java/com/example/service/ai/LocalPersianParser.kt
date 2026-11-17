@@ -23,10 +23,10 @@ object LocalPersianParser {
         // Users may omit both the conjunction and the word "ساعت":
         // "فردا ۹ صبح نان بخرم ۱۲ ظهر گوشت بخرم".
         // Split only when the later clock is followed by a concrete action phrase.
-        val nextTimedTaskStart = """(?:ساعت\s*)?[0-9۰-۹]{1,2}(?:[:：∶﹕٫][0-9۰-۹]{1,2})?\s*(?:صبح|بامداد|ظهر|بعدازظهر|بعد\s+از\s+ظهر|عصر|غروب|شب)\s+(?=[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,5}\s+(?:بخرم|بخریم|خرید\s+کنم|برم|بروم|زنگ\s+بزنم|تماس\s+بگیرم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|مراجعه\s+کنم|سر\s+بزنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم))"""
+        val nextTimedTaskStart = """(?:ساعت\s*)?[0-9۰-۹]{1,2}(?:[:：∶﹕٫][0-9۰-۹]{1,2})?\s*(?:صبح|بامداد|ظهر|بعدازظهر|بعد\s+از\s+ظهر|عصر|غروب|شب)?\s+(?=(?:(?:برم|بروم)\s+[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,3}|(?:زنگ\s+بزنم|تماس\s+بگیرم|خرید\s+کنم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|مراجعه\s+کنم|سر\s+بزنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم)|[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,5}\s+(?:بخرم|بخریم|برم|بروم|زنگ\s+بزنم|تماس\s+بگیرم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|مراجعه\s+کنم|سر\s+بزنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم)))"""
         val segments = clean.split(
             Regex(
-                """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|(?<=(?:بخرم|بخریم|برم|بروم|بزنم|بگیرم|کنم|بدم|دهم|بخورم|بخونم|بخوانم|باشم))\s+(?=$nextTimedTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
+                """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?=$nextTimedTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
             )
         ).map { it.trim().removePrefix("سپس").removePrefix("بعدش").trim().trim('،', '؛', ' ', '.') }.filter { it.isNotBlank() }
 
@@ -95,7 +95,9 @@ object LocalPersianParser {
             hasExplicitTime = hasExplicitTime,
             hasExplicitDate = hasExplicitDate,
             hasExplicitTitle = hasExplicitTitle,
-            isAmbiguous = analysis.needsUserClarification,
+            // Only an actual AM/PM ambiguity belongs in this flag.
+            // Missing title/date/time is handled by the corresponding slot checks.
+            isAmbiguous = analysis.validationStatus == ValidationStatus.AMBIGUOUS,
             clarificationQuestion = analysis.clarificationQuestion,
             quickSuggestions = analysis.quickSuggestions,
             analyzedResult = analysis
