@@ -23,6 +23,24 @@ private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_S
  * compatibility path stores it for the debug provider; no token is embedded in
  * the APK. With no launch token, the SDK reuses its saved token or generates one.
  */
+/**
+ * Reads the device-local debug secret created/reused by Firebase's debug provider.
+ * This is exposed only to the local debug diagnostics screen so the owner can
+ * register the exact token in the matching Firebase App Check app. It is never
+ * written into BuildConfig, logs, or the APK.
+ */
+fun getStoredAppCheckDebugToken(context: Context): String? {
+    val firebaseApp = FirebaseApp.getApps(context).firstOrNull() ?: return null
+    val prefs = context.getSharedPreferences(
+        "$DEBUG_STORE_PREFIX${firebaseApp.persistenceKey}",
+        Context.MODE_PRIVATE
+    )
+    return prefs.getString(DEBUG_SECRET_KEY, null)?.takeIf { it.isNotBlank() }
+}
+
+fun getFirebaseProjectId(context: Context): String? =
+    FirebaseApp.getApps(context).firstOrNull()?.options?.projectId
+
 fun configureAppCheck(context: Context, intent: Intent? = null) {
     try {
         if (FirebaseApp.getApps(context).isEmpty()) {
