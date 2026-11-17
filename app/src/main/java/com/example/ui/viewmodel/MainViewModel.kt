@@ -290,14 +290,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
             try {
-                // Never collapse a multi-task message into the engine's single draft slot.
-                // Queue every extracted task, including incomplete ones, and process them one by one.
-                if (!_conversationState.value.isWaitingForAnswer()) {
-                    val multiTasks = LocalPersianParser.parse(clean)
-                    val isReminderRequest = conversationalEngine.shouldRouteAsReminderAction(clean)
-                    if (multiTasks.size > 1 && isReminderRequest) {
-                        pendingMultiReminderTasks.clear()
-                        pendingMultiReminderTasks.addAll(multiTasks)
+                // Parse every incoming turn before considering the old clarification state.
+                // A complete new reminder command must not be consumed as an answer to an
+                // unrelated stale draft (for example, "tomorrow 9 AM buy bread, noon buy meat").
+                val extractedTasks = LocalPersianParser.parse(clean)
+                val isReminderRequest = conversationalEngine.shouldRouteAsReminderAction(clean)
+                val startsNewReminderRequest = isReminderRequest && extractedTasks.any { task ->
+                    task.hasExplicitTitle && (task.hasExplicitDate || task.hasExplicitTime)
+                }
+                if (startsNewReminderRequest) {
+                    // New explicit reminder commands supersede any unfinished draft/queue.
+                    // They must never inherit the title or date of a previous conversation turn.
+                    pendingMultiReminderTasks.clear()
+                    _conversationState.value = com.example.service.conversation.ConversationState()
+
+                    // Never collapse a multi-task message into the engine's single draft slot.
+                    // Queue every extracted task, including incomplete ones, and process them one by one.
+                    if (extractedTasks.size > 1) {
+                        pendingMultiReminderTasks.addAll(extractedTasks)
                         presentNextMultiReminder()
                         return@launch
                     }
