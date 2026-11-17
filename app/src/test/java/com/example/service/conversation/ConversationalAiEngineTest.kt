@@ -204,6 +204,27 @@ class ConversationalAiEngineTest {
         assertEquals(AwaitingField.EXECUTION_CONFIRMATION, turn2.newState.awaitingField)
     }
 
+    @Test
+    fun morningAnswerClearsAmbiguityAndDoesNotRepeatTheSameQuestion() = runBlocking {
+        val first = engine.processTurn(
+            userInput = "فردا ساعت ۸ یادم بنداز برم خونه",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(AwaitingField.AMBIGUOUS_HOUR_AM_PM, first.newState.awaitingField)
+
+        val resolved = engine.processTurn(
+            userInput = "صبح",
+            currentState = first.newState,
+            referenceTimeMillis = fixedReferenceMillis
+        )
+
+        assertEquals(AwaitingField.EXECUTION_CONFIRMATION, resolved.newState.awaitingField)
+        assertEquals("۰۸:۰۰", resolved.newState.draftTask?.timeText)
+        assertFalse(resolved.newState.draftTask?.hasAmbiguousTimePeriod == true)
+        assertFalse(resolved.replyText.contains("صبح است یا عصر"))
+    }
+
     /**
      * تست ۶: تشخیص دقیق روزهای هفته و تاریخ شمسی
      * «سه‌شنبه ساعت ۱۹ تماس با همکار»
