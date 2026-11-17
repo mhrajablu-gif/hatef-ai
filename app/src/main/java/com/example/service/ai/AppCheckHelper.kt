@@ -3,7 +3,6 @@ package com.example.service.ai
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.example.BuildConfig
 import com.google.firebase.FirebaseApp
 import com.google.firebase.appcheck.FirebaseAppCheck
 import com.google.firebase.appcheck.debug.DebugAppCheckProviderFactory
@@ -18,9 +17,10 @@ private const val DEBUG_SECRET_KEY = "com.google.firebase.appcheck.debug.DEBUG_S
  * Initializes App Check before any Firebase product SDK is used.
  * Debug builds use Firebase's debug provider; release builds use Play Integrity.
  *
- * The debug provider prints its generated token to Logcat. Register that token
- * in Firebase Console > App Check > Manage debug tokens. Do not hard-code or
- * persist tokens using private Firebase SDK preference keys.
+ * Existing registered debug tokens remain in the SDK's local preferences across
+ * app updates. If AI Studio supplies a token through the launch intent, this
+ * compatibility path stores it for the debug provider; no token is embedded in
+ * the APK. With no launch token, the SDK reuses its saved token or generates one.
  */
 fun configureAppCheck(context: Context, intent: Intent? = null) {
     try {
@@ -34,11 +34,10 @@ fun configureAppCheck(context: Context, intent: Intent? = null) {
 
         val appCheck = FirebaseAppCheck.getInstance()
         if (BuildConfig.DEBUG) {
-            // CI-built APKs do not receive AI Studio's launch intent. Prefer the
-            // registered token injected from CI, while retaining preview support.
-            val configuredToken = BuildConfig.FIREBASE_APPCHECK_DEBUG_TOKEN.trim()
-            val intentToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)?.trim()
-            val debugToken = configuredToken.takeIf { it.isNotBlank() } ?: intentToken
+            // Never package a registered debug token in the APK: this repository's
+            // Actions artifacts are publicly downloadable. Preserve AI Studio's
+            // launch-intent path for preview builds and leave saved device tokens intact.
+            val debugToken = intent?.getStringExtra(DEBUG_TOKEN_EXTRA)?.trim()
             if (!debugToken.isNullOrBlank()) {
                 val persistenceKey = FirebaseApp.getInstance().persistenceKey
                 val prefs = context.getSharedPreferences(
@@ -51,7 +50,7 @@ fun configureAppCheck(context: Context, intent: Intent? = null) {
                     Log.d(TAG, "Registered App Check debug token configured.")
                 }
             } else {
-                Log.e(TAG, "No App Check debug token was supplied by CI configuration or launch intent.")
+                Log.i(TAG, "No launch token supplied; the debug provider will reuse a saved token or generate one.")
             }
             appCheck.installAppCheckProviderFactory(
                 DebugAppCheckProviderFactory.getInstance()
