@@ -303,6 +303,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
 
+                // Keep the draft identity from before slot filling so a text confirmation
+                // can advance only the matching queued reminder.
+                val draftBeforeTurn = _conversationState.value.draftTask
                 // Outer guard covers the complete intent-processing turn, not only the Gemini call.
                 val response = kotlinx.coroutines.withTimeout(22_000L) {
                     conversationalEngine.processTurn(
@@ -327,13 +330,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _chatMessages.value = _chatMessages.value + assistantMsg
                 ttsSpeaker.speak(response.replyText)
 
-                if (pendingMultiReminderTasks.isNotEmpty()) {
-                    when {
-                        response.executedResult?.success == true ||
-                            response.newState.slotStatus == com.example.service.conversation.SlotFillingStatus.CANCELLED -> {
-                            pendingMultiReminderTasks.removeFirst()
-                            presentNextMultiReminder()
-                        }
+                val completedByText = response.executedResult?.success == true ||
+                    response.newState.slotStatus == com.example.service.conversation.SlotFillingStatus.CANCELLED
+                if (completedByText && draftBeforeTurn != null) {
+                    val resultMessage = response.executedResult?.message ?: "یادآور «${draftBeforeTurn.title}» لغو شد."
+                    val resultCard = com.example.service.conversation.ConversationActionCard(
+                        type = com.example.service.conversation.ActionCardType.EXECUTION_RESULT,
+                        task = draftBeforeTurn,
+                        targetReminder = response.executedResult?.data as? ReminderEntity,
+                        statusMessage = resultMessage
+                    )
+                    _chatMessages.value = _chatMessages.value.map { message ->
+                        if (message.actionCard?.type == com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER &&
+                            message.actionCard.task == draftBeforeTurn
+                        ) message.copy(actionCard = resultCard) else message
+                    }
+                    if (pendingMultiReminderTasks.removeFirstIfSameSource(draftBeforeTurn)) {
+                        presentNextMultiReminder()
                     }
                 }
 
