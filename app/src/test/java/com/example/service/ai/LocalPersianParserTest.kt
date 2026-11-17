@@ -49,6 +49,20 @@ class LocalPersianParserTest {
     }
 
     @Test
+    fun splitsSecondActionEvenWhenItHasNoDateOrTime() {
+        val input = "فردا ساعت ۹ به بانک بروم و به دکتر زنگ بزنم"
+
+        val tasks = LocalPersianParser.parse(input, referenceTimeMillis = 1_794_556_800_000L)
+
+        assertEquals(2, tasks.size)
+        assertTrue(tasks[0].hasExplicitDate)
+        assertTrue(tasks[0].hasExplicitTime)
+        assertTrue(tasks[1].title.contains("دکتر"))
+        assertFalse(tasks[1].hasExplicitDate)
+        assertFalse(tasks[1].hasExplicitTime)
+    }
+
+    @Test
     fun splitsTwoTasksWhenSecondHourNeedsAmPmClarification() {
         val input = "فردا ساعت ۱۸ نون بخرم و ساعت ۵ برم سبزی بخرم"
 
