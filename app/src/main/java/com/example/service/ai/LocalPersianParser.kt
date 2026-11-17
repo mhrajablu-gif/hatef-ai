@@ -20,9 +20,13 @@ object LocalPersianParser {
         // when the following words form a new action, not when they are merely a list
         // of people or objects (for example, "با علی و رضا جلسه داشته باشم").
         val nextTaskStart = """(?:برای\s+)?(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌_]?فردا|پسفردا|فردا|امروز|سال\s+آینده|[0-9۰-۹]+\s*روز|پنج\s+دقیقه|یک\s+ربع|نیم\s+ساعت|هر|ساعت|(?:به\s+[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,2}\s+(?:زنگ\s+بزنم|تماس\s+بگیرم|مراجعه\s+کنم|سر\s+بزنم|برم|بروم|وقت\s+بگیرم|نوبت\s+بگیرم))|(?:برم|بروم)\s+[\p{L}\p{M}‌_-]+|(?:زنگ\s+بزنم|تماس\s+بگیرم|خرید\s+کنم|بخرم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم))"""
+        // Users may omit both the conjunction and the word "ساعت":
+        // "فردا ۹ صبح نان بخرم ۱۲ ظهر گوشت بخرم".
+        // Split only when the later clock is followed by a concrete action phrase.
+        val nextTimedTaskStart = """(?:ساعت\s*)?[0-9۰-۹]{1,2}(?:[:：∶﹕٫][0-9۰-۹]{1,2})?\s*(?:صبح|بامداد|ظهر|بعدازظهر|بعد\s+از\s+ظهر|عصر|غروب|شب)\s+(?=[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,5}\s+(?:بخرم|بخریم|خرید\s+کنم|برم|بروم|زنگ\s+بزنم|تماس\s+بگیرم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|مراجعه\s+کنم|سر\s+بزنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم))"""
         val segments = clean.split(
             Regex(
-                """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
+                """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?=$nextTimedTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
             )
         ).map { it.trim().removePrefix("سپس").removePrefix("بعدش").trim().trim('،', '؛', ' ', '.') }.filter { it.isNotBlank() }
 
