@@ -94,17 +94,9 @@ jobs:
             echo "FIREBASE_APPCHECK_DEBUG_TOKEN_READY=false" >> "$GITHUB_ENV"
             echo "::warning::Registered Firebase App Check debug token is missing. Tests will run, but no APK will be published."
           else
-            python3 - <<'PY'
-          import os
-          path = ".env"
-          key = "FIREBASE_APPCHECK_DEBUG_TOKEN"
-          with open(path, encoding="utf-8") as source:
-              lines = source.read().splitlines()
-          lines = [line for line in lines if not line.startswith(key + "=")]
-          lines.append(key + "=" + os.environ[key])
-          with open(path, "w", encoding="utf-8") as target:
-              target.write("\n".join(lines) + "\n")
-          PY
+            # Pass the secret to Gradle as an environment variable. The build script
+            # emits it as a correctly quoted Java string literal in BuildConfig.
+            echo "FIREBASE_APPCHECK_DEBUG_TOKEN=$FIREBASE_APPCHECK_DEBUG_TOKEN" >> "$GITHUB_ENV"
             echo "FIREBASE_APPCHECK_DEBUG_TOKEN_READY=true" >> "$GITHUB_ENV"
           fi
 
