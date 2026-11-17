@@ -26,6 +26,11 @@ internal class PendingReminderQueue {
         return true
     }
 
+    fun isFirstSameSource(task: ParsedTask): Boolean {
+        val current = tasks.peekFirst() ?: return false
+        return sameSource(current, task)
+    }
+
     fun removeFirstIfSameSource(task: ParsedTask): Boolean {
         val current = tasks.peekFirst() ?: return false
         if (!sameSource(current, task)) return false
