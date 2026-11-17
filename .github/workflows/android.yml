@@ -183,7 +183,7 @@ jobs:
         if: env.FIREBASE_CONFIG_READY == 'true' && env.FIREBASE_APPCHECK_DEBUG_TOKEN_READY == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: yadet-v1.19.1
+          name: yadet-v1.19.2
           path: release/yadet-v1.19.2.apk
           retention-days: 14
 
