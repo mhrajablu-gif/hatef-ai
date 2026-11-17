@@ -88,9 +88,11 @@ class LocalPersianParserTest {
 
         assertEquals(2, tasks.size)
         assertTrue(tasks[0].title.contains("نون"))
+        assertTrue(tasks[0].hasExplicitTitle)
         assertTrue(tasks[0].hasExplicitDate)
         assertTrue(tasks[0].hasExplicitTime)
         assertTrue(tasks[1].title.contains("گوشت"))
+        assertTrue(tasks[1].hasExplicitTitle)
         assertTrue(tasks[1].hasExplicitDate)
         assertTrue(tasks[1].hasExplicitTime)
         assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
