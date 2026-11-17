@@ -24,11 +24,37 @@ object LocalPersianParser {
         // "فردا ۹ صبح نان بخرم ۱۲ ظهر گوشت بخرم".
         // Split only when the later clock is followed by a concrete action phrase.
         val nextTimedTaskStart = """(?:ساعت\s*)?[0-9۰-۹]{1,2}(?:[:：∶﹕٫][0-9۰-۹]{1,2})?\s*(?:صبح|بامداد|ظهر|بعدازظهر|بعد\s+از\s+ظهر|عصر|غروب|شب)?\s+(?=(?:(?:برم|بروم)\s+[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,3}|(?:زنگ\s+بزنم|تماس\s+بگیرم|خرید\s+کنم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|مراجعه\s+کنم|سر\s+بزنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم)|[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,5}\s+(?:بخرم|بخریم|برم|بروم|زنگ\s+بزنم|تماس\s+بگیرم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|مراجعه\s+کنم|سر\s+بزنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم)))"""
-        val segments = clean.split(
+        // First split only on strong linguistic boundaries. Do not split at the
+        // first clock in a sentence: it belongs to the first task.
+        val strongSegments = clean.split(
             Regex(
-                """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?=$nextTimedTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
+                """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
             )
-        ).map { it.trim().removePrefix("سپس").removePrefix("بعدش").trim().trim('،', '؛', ' ', '.') }.filter { it.isNotBlank() }
+        )
+
+        // Then split only subsequent clock+action pairs within each segment.
+        // This supports "فردا ساعت ۱۴ برم خانه ساعت ۱۶ برم باشگاه" without
+        // accidentally separating the first date/time from its task.
+        val timedTaskRegex = Regex(nextTimedTaskStart)
+        val segments = strongSegments.flatMap { segment ->
+            val subsequentStarts = timedTaskRegex.findAll(segment)
+                .drop(1)
+                .map { it.range.first }
+                .toList()
+            if (subsequentStarts.isEmpty()) {
+                listOf(segment)
+            } else {
+                val pieces = mutableListOf<String>()
+                var cursor = 0
+                subsequentStarts.forEach { start ->
+                    if (start > cursor) pieces.add(segment.substring(cursor, start))
+                    cursor = start
+                }
+                if (cursor < segment.length) pieces.add(segment.substring(cursor))
+                pieces
+            }
+        }.map { it.trim().removePrefix("سپس").removePrefix("بعدش").trim().trim('،', '؛', ' ', '.') }
+            .filter { it.isNotBlank() }
 
         val tasks = mutableListOf<ParsedTask>()
         var inheritedDateText: String? = null
