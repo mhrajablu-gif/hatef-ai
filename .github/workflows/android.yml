@@ -103,7 +103,7 @@ jobs:
           lines = [line for line in lines if not line.startswith(key + "=")]
           lines.append(key + "=" + os.environ[key])
           with open(path, "w", encoding="utf-8") as target:
-              target.write("\\n".join(lines) + "\\n")
+              target.write("\n".join(lines) + "\n")
           PY
             echo "FIREBASE_APPCHECK_DEBUG_TOKEN_READY=true" >> "$GITHUB_ENV"
           fi
