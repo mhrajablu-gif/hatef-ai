@@ -33,11 +33,17 @@ jobs:
               config = json.load(f)
           with open("app/build.gradle.kts", encoding="utf-8") as f:
               gradle = f.read()
-          match = re.search(r'applicationId\\s*=\\s*"([^"]+)"', gradle)
-          if not match:
+          expected = next(
+              (
+                  line.split('"')[1]
+                  for line in gradle.splitlines()
+                  if "applicationId" in line and "=" in line and '"' in line
+              ),
+              None,
+          )
+          if not expected:
               print("::error::Could not determine applicationId from app/build.gradle.kts")
               sys.exit(1)
-          expected = match.group(1)
           packages = [
               client.get("client_info", {}).get("android_client_info", {}).get("package_name")
               for client in config.get("client", [])
