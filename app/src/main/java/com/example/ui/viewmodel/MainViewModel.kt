@@ -538,7 +538,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         // Convert the original preview card into a result card so it cannot be
                         // tapped again to create the same reminder twice.
                         _chatMessages.value = _chatMessages.value.map { message ->
-                            if (message.actionCard == card) message.copy(text = confirmReply, actionCard = resultCard) else message
+                            if (message.actionCard == card) {
+                                message.copy(
+                                    text = if (result.success) confirmReply else message.text,
+                                    actionCard = resultCard
+                                )
+                            } else message
                         }
                         // A successful result is already visible in the converted card.
                         // Add a separate text bubble only when saving failed.
