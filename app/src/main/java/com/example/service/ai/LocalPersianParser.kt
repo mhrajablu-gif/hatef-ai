@@ -16,7 +16,10 @@ object LocalPersianParser {
         // Split only at strong task boundaries. Accept common Persian connectors even
         // when the next task begins with "برای" (e.g. "و همچنین برای پس‌فردا ...").
         // Ordinary conjunctions inside a task are deliberately preserved.
-        val nextTaskStart = """(?:برای\s+)?(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌_]?فردا|پسفردا|فردا|امروز|سال\s+آینده|[0-9۰-۹]+\s*روز|پنج\s+دقیقه|یک\s+ربع|نیم\s+ساعت|هر|ساعت)"""
+        // A second independent action may omit its own date/time. Split on "و" only
+        // when the following words form a new action, not when they are merely a list
+        // of people or objects (for example, "با علی و رضا جلسه داشته باشم").
+        val nextTaskStart = """(?:برای\s+)?(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌_]?فردا|پسفردا|فردا|امروز|سال\s+آینده|[0-9۰-۹]+\s*روز|پنج\s+دقیقه|یک\s+ربع|نیم\s+ساعت|هر|ساعت|(?:به\s+[\p{L}\p{M}‌_-]+(?:\s+[\p{L}\p{M}‌_-]+){0,2}\s+(?:زنگ\s+بزنم|تماس\s+بگیرم|مراجعه\s+کنم|سر\s+بزنم|برم|بروم|وقت\s+بگیرم|نوبت\s+بگیرم))|(?:برم|بروم)\s+[\p{L}\p{M}‌_-]+|(?:زنگ\s+بزنم|تماس\s+بگیرم|خرید\s+کنم|بخرم|پرداخت\s+کنم|واریز\s+کنم|ارسال\s+کنم|تحویل\s+بدم|تحویل\s+دهم|پیگیری\s+کنم|دارو\s+بخورم|قرص\s+بخورم|مطالعه\s+کنم|کتاب\s+بخونم|ورزش\s+کنم|تمرین\s+کنم))"""
         val segments = clean.split(
             Regex(
                 """(?<=[،؛\n.!؟])|\s+و\s+(?:(?:همچنین|بعدش)\s+)?(?=$nextTaskStart)|\s+(?:سپس|بعدش)\s+(?=$nextTaskStart)"""
