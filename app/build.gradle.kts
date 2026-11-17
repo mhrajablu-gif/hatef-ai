@@ -20,8 +20,6 @@ android {
     versionName = "1.19.2"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    // Keep this value a valid Java string literal even when CI has no token configured.
-    buildConfigField("String", "FIREBASE_APPCHECK_DEBUG_TOKEN", "\"${System.getenv("FIREBASE_APPCHECK_DEBUG_TOKEN").orEmpty()}\"")
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building,
@@ -83,8 +81,6 @@ googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.W
 secrets {
   propertiesFileName = ".env"
   defaultPropertiesFileName = ".env.example"
-  // This field is supplied explicitly above so an absent token still compiles as an empty string.
-  ignoreList.add("FIREBASE_APPCHECK_DEBUG_TOKEN")
 }
 
 // Some unused dependencies are commented out below instead of being removed.
