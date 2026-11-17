@@ -331,17 +331,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (response.newState.activeIntent == com.example.service.conversation.ConversationIntent.CREATE_REMINDER) {
                     response.newState.draftTask?.let { pendingMultiReminderTasks.replaceFirst(it) }
                 }
+                val completedByText = response.executedResult?.success == true ||
+                    response.newState.slotStatus == com.example.service.conversation.SlotFillingStatus.CANCELLED
                 val assistantMsg = com.example.service.conversation.ChatMessage(
                     sender = com.example.service.conversation.MessageSender.ASSISTANT,
                     text = response.replyText,
                     actionCard = response.actionCard,
                     suggestedReplies = response.suggestedReplies
                 )
-                _chatMessages.value = _chatMessages.value + assistantMsg
-                ttsSpeaker.speak(response.replyText)
-
-                val completedByText = response.executedResult?.success == true ||
-                    response.newState.slotStatus == com.example.service.conversation.SlotFillingStatus.CANCELLED
+                var existingPreviewUpdated = false
                 if (completedByText && draftBeforeTurn != null) {
                     val resultMessage = response.executedResult?.message ?: "یادآور «${draftBeforeTurn.title}» لغو شد."
                     val resultCard = com.example.service.conversation.ConversationActionCard(
@@ -353,12 +351,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _chatMessages.value = _chatMessages.value.map { message ->
                         if (message.actionCard?.type == com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER &&
                             message.actionCard.task == draftBeforeTurn
-                        ) message.copy(actionCard = resultCard) else message
+                        ) {
+                            existingPreviewUpdated = true
+                            message.copy(actionCard = resultCard)
+                        } else message
                     }
                     if (pendingMultiReminderTasks.removeFirstIfSameSource(draftBeforeTurn)) {
                         presentNextMultiReminder()
                     }
                 }
+                // The old preview card becomes the result card. Do not append a second
+                // success bubble/card for the same operation.
+                if (!existingPreviewUpdated) {
+                    _chatMessages.value = _chatMessages.value + assistantMsg
+                }
+                ttsSpeaker.speak(response.replyText)
 
                 if (response.executedResult != null && response.executedResult.success) {
                     _uiState.value = _uiState.value.copy(
@@ -531,12 +538,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _chatMessages.value = _chatMessages.value.map { message ->
                             if (message.actionCard == card) message.copy(actionCard = resultCard) else message
                         }
-                        val assistantMsg = com.example.service.conversation.ChatMessage(
-                            sender = com.example.service.conversation.MessageSender.ASSISTANT,
-                            text = confirmReply,
-                            suggestedReplies = if (result.success) listOf("یادآور جدید", "مشاهده یادآورها") else listOf("آره، دوباره ثبت کن", "لغو")
-                        )
-                        _chatMessages.value = _chatMessages.value + assistantMsg
+                        // A successful result is already visible in the converted card.
+                        // Add a separate text bubble only when saving failed.
+                        if (!result.success) {
+                            val assistantMsg = com.example.service.conversation.ChatMessage(
+                                sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                                text = confirmReply,
+                                suggestedReplies = listOf("آره، دوباره ثبت کن", "لغو")
+                            )
+                            _chatMessages.value = _chatMessages.value + assistantMsg
+                        }
                         ttsSpeaker.speak(confirmReply)
                         if (result.success && pendingMultiReminderTasks.removeFirstIfSameSource(task)) {
                             presentNextMultiReminder()
