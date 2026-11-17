@@ -90,11 +90,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Sequential queue: each independently parsed task is clarified and confirmed on its own.
     private val pendingMultiReminderTasks = PendingReminderQueue()
 
-    private fun sameReminderSource(first: ParsedTask, second: ParsedTask): Boolean =
-        first.description.isNotBlank() &&
-            first.description == second.description &&
-            first.rawTimePhrase == second.rawTimePhrase
-
     private val _conversationState = MutableStateFlow(com.example.service.conversation.ConversationState())
     val conversationState: StateFlow<com.example.service.conversation.ConversationState> = _conversationState.asStateFlow()
 
@@ -462,7 +457,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     card.task?.let { task ->
                         // A stale card must match the active draft as well as the queue head.
                         val activeDraft = _conversationState.value.draftTask
-                        if (activeDraft == null || !sameReminderSource(activeDraft, task)) return@launch
+                        if (activeDraft == null || activeDraft != task) return@launch
                         if (pendingMultiReminderTasks.isNotEmpty() &&
                             !pendingMultiReminderTasks.isFirstSameSource(task)
                         ) return@launch
@@ -580,7 +575,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (card.type == com.example.service.conversation.ActionCardType.PREVIEW_NEW_REMINDER) {
             val task = card.task ?: return
             val activeDraft = _conversationState.value.draftTask
-            if (activeDraft == null || !sameReminderSource(activeDraft, task)) return
+            if (activeDraft == null || activeDraft != task) return
         }
         val hadQueuedTasks = pendingMultiReminderTasks.isNotEmpty()
         val cancelledQueuedTask = if (hadQueuedTasks) {
