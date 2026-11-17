@@ -135,8 +135,8 @@ jobs:
           VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionCode='([^']+)'.*/\\1/p")"
           VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionName='([^']+)'.*/\\1/p")"
           test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq"
-          test "$VERSION_CODE" = "31"
-          test "$VERSION_NAME" = "1.19.2"
+          test "$VERSION_CODE" = "32"
+          test "$VERSION_NAME" = "1.19.3"
 
           VERIFY_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
           printf '%s\n' "$VERIFY_OUTPUT"
@@ -155,9 +155,9 @@ jobs:
         if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.19.2.apk
-          test -s release/yadet-v1.19.2.apk
-          sha256sum release/yadet-v1.19.2.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.19.3.apk
+          test -s release/yadet-v1.19.3.apk
+          sha256sum release/yadet-v1.19.3.apk
 
       - name: Upload unit test reports
         if: always()
@@ -172,8 +172,8 @@ jobs:
         if: env.FIREBASE_CONFIG_READY == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: yadet-v1.19.2
-          path: release/yadet-v1.19.2.apk
+          name: yadet-v1.19.3
+          path: release/yadet-v1.19.3.apk
           retention-days: 14
 
 # Rebuild after stable signing-key restoration and Android version bump.
