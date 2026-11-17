@@ -88,7 +88,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val toolRegistry = com.example.service.conversation.AssistantToolRegistry(application, repository)
     private val conversationalEngine = com.example.service.conversation.ConversationalAiEngine(toolRegistry)
     // Sequential queue: each independently parsed task is clarified and confirmed on its own.
-    private val pendingMultiReminderTasks = ArrayDeque<ParsedTask>()
+    private val pendingMultiReminderTasks = PendingReminderQueue()
 
     private val _conversationState = MutableStateFlow(com.example.service.conversation.ConversationState())
     val conversationState: StateFlow<com.example.service.conversation.ConversationState> = _conversationState.asStateFlow()
@@ -313,6 +313,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 _conversationState.value = response.newState
+                // Slot filling returns a copied ParsedTask. Keep the queue head in sync
+                // so confirming the clarified card advances to the next independent task.
+                if (response.newState.activeIntent == com.example.service.conversation.ConversationIntent.CREATE_REMINDER) {
+                    response.newState.draftTask?.let { pendingMultiReminderTasks.replaceFirst(it) }
+                }
                 val assistantMsg = com.example.service.conversation.ChatMessage(
                     sender = com.example.service.conversation.MessageSender.ASSISTANT,
                     text = response.replyText,
@@ -500,8 +505,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         )
                         _chatMessages.value = _chatMessages.value + assistantMsg
                         ttsSpeaker.speak(confirmReply)
-                        if (result.success && pendingMultiReminderTasks.firstOrNull() == task) {
-                            pendingMultiReminderTasks.removeFirst()
+                        if (result.success && pendingMultiReminderTasks.removeFirstIfSameSource(task)) {
                             presentNextMultiReminder()
                         }
                     }
