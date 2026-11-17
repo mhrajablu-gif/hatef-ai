@@ -83,6 +83,9 @@ class GeneralConversationalAiService {
                 append("\nجزئیات فنی: ")
                 append(diagnosticDetails)
             }
+            if (diagnosticDetails?.contains("App Check token is invalid", ignoreCase = true) == true) {
+                append("\nراهکار: در تنظیمات برنامه، بخش «عیب‌یابی اتصال هوش مصنوعی» را باز کنید؛ توکن دستگاه را کپی و در App Check → Debug tokens همان پروژه و برنامه اندرویدی ثبت کنید.")
+            }
         }
         if (offlineFallback != null) {
             return offlineFallback + diagnosticNotice
