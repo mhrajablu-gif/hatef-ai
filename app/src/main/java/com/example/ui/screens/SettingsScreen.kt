@@ -59,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,6 +78,11 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    var appCheckDebugToken by remember {
+        mutableStateOf(com.example.service.ai.getStoredAppCheckDebugToken(context))
+    }
+    val firebaseProjectId = remember { com.example.service.ai.getFirebaseProjectId(context) }
     val alarmManager = remember { context.getSystemService(Context.ALARM_SERVICE) as AlarmManager }
     var exactAlarmAllowed by remember {
         mutableStateOf(
@@ -453,6 +460,57 @@ fun SettingsScreen(
                         title = "کنترل ضبط صوت (Push-to-Talk)",
                         desc = "صدا صرفاً زمانی که دکمه میکروفون فشرده نگه داشته شده ضبط می‌شود و با رها کردن فوراً متوقف می‌گردد."
                     )
+                }
+            }
+        }
+
+        // Local-only App Check diagnostics for this debug APK. The token is never embedded in the APK.
+        if (BuildConfig.DEBUG) {
+            item {
+                SectionCard(
+                    title = "عیب‌یابی اتصال هوش مصنوعی",
+                    icon = Icons.Filled.Security
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TechRow(label = "شناسه برنامه:", value = BuildConfig.APPLICATION_ID)
+                        TechRow(label = "پروژه Firebase:", value = firebaseProjectId ?: "نامشخص")
+                        Text(
+                            text = appCheckDebugToken?.let {
+                                "توکن Debug ذخیره‌شده: ${it.take(6)}••••${it.takeLast(4)}"
+                            } ?: "هنوز توکن Debug روی دستگاه ذخیره نشده است.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    appCheckDebugToken = com.example.service.ai.getStoredAppCheckDebugToken(context)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("بازخوانی توکن")
+                            }
+                            Button(
+                                onClick = {
+                                    appCheckDebugToken?.let {
+                                        clipboardManager.setText(AnnotatedString(it))
+                                    }
+                                },
+                                enabled = !appCheckDebugToken.isNullOrBlank(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("کپی توکن")
+                            }
+                        }
+                        Text(
+                            text = "اگر خطای «App Check token is invalid» می‌بینید، این توکن را فقط در بخش App Check → Debug tokens همان پروژه و برنامهٔ اندرویدی بالا ثبت کنید. توکن را در گفتگو یا برای دیگران ارسال نکنید.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                        )
+                    }
                 }
             }
         }
