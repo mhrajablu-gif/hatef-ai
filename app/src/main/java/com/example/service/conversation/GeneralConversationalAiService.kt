@@ -109,11 +109,7 @@ class GeneralConversationalAiService {
             .joinToString(" | ")
         if (raw.isBlank()) return null
 
-        return raw
-            .replace(Regex("(?i)AIza[0-9A-Za-z_-]{20,}"), "[کلید مخفی حذف شد]")
-            .replace(Regex("(?i)Bearer\\s+[A-Za-z0-9._~-]+"), "Bearer [توکن حذف شد]")
-            .replace(Regex("[\\r\\n\\t]+"), " ")
-            .take(360)
+        return sanitizeServerDiagnostic(raw)
     }
 
     private suspend fun executeOnlineTurn(
@@ -298,4 +294,32 @@ class GeneralConversationalAiService {
             else -> null
         }
     }
+}
+
+
+/**
+ * Converts server diagnostics into short, readable Persian text.
+ * Some blocked requests return an HTML error page instead of a JSON API error.
+ * Never expose the raw HTML document in the chat transcript.
+ */
+internal fun sanitizeServerDiagnostic(raw: String): String {
+    val compact = raw.replace(Regex("[\\r\\n\\t]+"), " ").trim()
+    val isHtml = compact.contains("<!DOCTYPE html", ignoreCase = true) ||
+        compact.contains("<html", ignoreCase = true) ||
+        compact.contains("<title>", ignoreCase = true)
+    if (isHtml) {
+        val title = Regex("<title[^>]*>(.*?)</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            .find(compact)?.groupValues?.getOrNull(1)
+            ?.replace(Regex("<[^>]+>"), "")
+            ?.replace(Regex("\\s+"), " ")
+            ?.trim()
+            ?.take(100)
+        val status = title?.takeIf { it.contains("403") || it.contains("Forbidden", ignoreCase = true) }
+            ?: "پاسخ HTML نامعتبر"
+        return "$status؛ سرور به‌جای پاسخ API صفحهٔ خطا برگردانده است."
+    }
+    return compact
+        .replace(Regex("(?i)AIza[0-9A-Za-z_-]{20,}"), "[کلید مخفی حذف شد]")
+        .replace(Regex("(?i)Bearer\\s+[A-Za-z0-9._~-]+"), "Bearer [توکن حذف شد]")
+        .take(360)
 }
