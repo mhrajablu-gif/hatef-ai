@@ -24,4 +24,28 @@ class GeneralConversationalAiServiceTest {
         assertNotNull(reply)
         assertTrue(reply!!.contains("۲۵ دقیقه"))
     }
+
+    @Test
+    fun html403ResponseIsShownAsShortReadableDiagnostic() {
+        val diagnostic = sanitizeServerDiagnostic(
+            "<!DOCTYPE html><html><head><title>Error 403 (Forbidden)!!1</title></head><body>blocked</body></html>"
+        )
+
+        assertTrue(diagnostic.contains("403"))
+        assertTrue(diagnostic.contains("سرور"))
+        assertFalse(diagnostic.contains("<html"))
+        assertFalse(diagnostic.contains("<!DOCTYPE"))
+    }
+
+    @Test
+    fun ordinaryJsonDiagnosticKeepsUsefulDetailsAndRemovesApiKeys() {
+        val diagnostic = sanitizeServerDiagnostic(
+            "PERMISSION_DENIED: invalid key AIza123456789012345678901234567890"
+        )
+
+        assertTrue(diagnostic.contains("PERMISSION_DENIED"))
+        assertTrue(diagnostic.contains("[کلید مخفی حذف شد]"))
+        assertFalse(diagnostic.contains("AIza"))
+    }
+
 }
