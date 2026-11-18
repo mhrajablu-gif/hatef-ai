@@ -139,4 +139,21 @@ class LocalPersianParserTest {
         assertFalse(tasks[1].hasAmbiguousTimePeriod)
     }
 
+    @Test
+    fun splitsAdjacentTimedTasksWhenSecondStartsWithHam() {
+        val input = "فردا ساعت ۱۰ برم نون بخرم ساعت ۱۴ هم برم سرکار"
+
+        val tasks = LocalPersianParser.parse(input, referenceTimeMillis = 1_794_556_800_000L)
+
+        assertEquals(2, tasks.size)
+        assertTrue(tasks[0].title.contains("نون"))
+        assertEquals("۱۰:۰۰", tasks[0].timeText)
+        assertTrue(tasks[0].hasExplicitDate)
+        assertTrue(tasks[1].title.contains("سرکار"))
+        assertEquals("۱۴:۰۰", tasks[1].timeText)
+        assertTrue(tasks[1].hasExplicitDate)
+        assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
+    }
+
+
 }
