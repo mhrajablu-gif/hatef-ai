@@ -609,5 +609,39 @@ class ConversationalAiEngineTest {
         assertFalse(dayOfMonthTurn.newState.isWaitingForAnswer())
     }
 
+
+    @Test
+    fun weeklyWednesdayReminderKeepsItsRecurrenceInTheChatFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "هر هفته چهارشنبه‌ها ساعت ۸ صبح ورزش کنم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertEquals("WEEKLY", turn.newState.draftTask?.repeatType)
+        assertEquals("WED", turn.newState.draftTask?.recurrenceDaysOfWeek)
+        assertTrue(turn.newState.draftTask?.title?.contains("ورزش") == true)
+    }
+
+    @Test
+    fun dailyExceptFridayReminderKeepsAllAllowedWeekdaysInTheChatFlow() = runBlocking {
+        val turn = engine.processTurn(
+            userInput = "هر روز به جز جمعه‌ها ساعت ۷ صبح ورزش رو یادم بنداز",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis,
+            timeZone = tehranTimeZone
+        )
+
+        assertEquals(ConversationIntent.CREATE_REMINDER, turn.newState.activeIntent)
+        assertEquals("CUSTOM", turn.newState.draftTask?.repeatType)
+        assertEquals(
+            setOf("SAT", "SUN", "MON", "TUE", "WED", "THU"),
+            turn.newState.draftTask?.recurrenceDaysOfWeek?.split(",")?.toSet()
+        )
+        assertTrue(turn.newState.draftTask?.title?.contains("ورزش") == true)
+    }
+
 }
 
