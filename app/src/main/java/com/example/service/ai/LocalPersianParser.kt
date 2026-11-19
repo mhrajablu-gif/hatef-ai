@@ -30,10 +30,22 @@ object LocalPersianParser {
             }
             val task = if (effectiveSegment == segment) initial else parseSingleCommand(effectiveSegment, referenceTimeMillis)
             tasks.add(task)
-            val dateMatch = dateContextPattern.find(segment)
+            val dateSearchText = PersianCommandAnalyzer.normalizeText(segment)
+                .replace(Regex("""(?:به\s*جز|به‌جز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""), " ")
+            val dateMatch = dateContextPattern.find(dateSearchText)
             if (dateMatch != null) inheritedDateContext = dateMatch.value
         }
         return tasks
+    }
+
+    private fun hasExplicitDatePhrase(input: String): Boolean {
+        val normalized = PersianCommandAnalyzer.normalizeText(input)
+        val withoutExcludedDays = normalized.replace(
+            Regex("""(?:به\s*جز|به‌جز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""),
+            " "
+        )
+        val datePattern = Regex("""(?:امروز|امشب|فردا|پس[\s‌]?فردا|پس\s+اون\s+فردا|هفته\s+(?:بعد|آینده)|چهارشنبه|پنجشنبه|پنج‌شنبه|سه‌شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه|[\d۰-۹]{1,2}\s*(?:فروردین|اردیبهشت|خرداد|تیر|مرداد|شهریور|مهر|آبان|آذر|دی|بهمن|اسفند))""")
+        return datePattern.containsMatchIn(withoutExcludedDays)
     }
 
     fun parseSingleCommand(rawSegment: String, referenceTimeMillis: Long = System.currentTimeMillis()): ParsedTask {
@@ -49,7 +61,7 @@ object LocalPersianParser {
         val dateText = analysis.jalaliDateText ?: jDate.formatPersianNumeric()
 
         val hasExplicitTime = analysis.hour != null
-        val hasExplicitDate = analysis.jalaliDateText != null
+        val hasExplicitDate = hasExplicitDatePhrase(rawSegment)
         val hasExplicitTitle = analysis.title.isNotBlank() && !analysis.title.startsWith("یادآوری ساعت")
 
         return ParsedTask(
