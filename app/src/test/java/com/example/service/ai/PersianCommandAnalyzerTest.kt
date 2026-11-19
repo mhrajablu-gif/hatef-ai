@@ -329,4 +329,18 @@ class PersianCommandAnalyzerTest {
         assertTrue(tasks.all { it.hasExplicitTime && it.hasExplicitDate })
     }
 
+
+    @Test
+    fun secondReminderInSameSentenceInheritsTheFirstReminderDate() {
+        val tasks = LocalPersianParser.parse(
+            "فردا ساعت ۹ بانک برم و ساعت ۱۰ خرید کنم",
+            baseTime
+        )
+
+        assertEquals(2, tasks.size)
+        assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
+        assertEquals("۰۹:۰۰", tasks[0].timeText)
+        assertEquals("۱۰:۰۰", tasks[1].timeText)
+    }
+
 }
