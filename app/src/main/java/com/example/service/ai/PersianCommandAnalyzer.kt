@@ -551,7 +551,14 @@ object PersianCommandAnalyzer {
         val exclusionRegex = Regex("""(?:به\s*جز|غیر\s*از|به\s*استثنای)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|سه\s*شنبه|چهارشنبه|پنجشنبه|پنج‌شنبه|جمعه)""")
         exclusionRegex.findAll(text).forEach { match -> excluded.add(normalizeWeekday(match.groupValues[1].replace(" ", ""))) }
         val mentioned = linkedSetOf<String>()
-        weekdayNames.forEach { day -> if (text.contains(day)) mentioned.add(day) }
+        weekdayNames.filter { it != "شنبه" }.forEach { day ->
+            if (text.contains(day)) mentioned.add(day)
+        }
+        // "شنبه" is a suffix of چهارشنبه/پنجشنبه/سه‌شنبه/یکشنبه/دوشنبه; count it only when standalone.
+        val withoutCompoundWeekdays = weekdayNames.filter { it != "شنبه" }.fold(text) { acc, day ->
+            acc.replace(day, " ")
+        }
+        if (withoutCompoundWeekdays.contains("شنبه")) mentioned.add("شنبه")
         val allowed = (weekdayNames.toSet() - excluded).mapNotNull { tokenByWeekday[it] }.toSet()
         val mentionedAllowed = (mentioned - excluded).mapNotNull { tokenByWeekday[it] }.toSet()
         return when {
