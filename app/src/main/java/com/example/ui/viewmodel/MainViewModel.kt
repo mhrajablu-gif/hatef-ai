@@ -250,8 +250,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             // If a batch preview is waiting, only an explicit confirmation can save it.
             if (pendingBatchTasks.isNotEmpty()) {
-                val confirm = Regex("""^(بله|آره|اره|تأیید|تایید)(\s|$)""").containsMatchIn(clean)
-                val cancel = Regex("""^(نه|خیر|لغو|بی‌خیال)(\s|$)""").containsMatchIn(clean)
+                val confirm = Regex("""^(بله|آره|اره|تأیید|تایید)(?:[\s،.!؟?]|$)""").containsMatchIn(clean)
+                val cancel = Regex("""^(نه|خیر|لغو|بی‌خیال)(?:[\s،.!؟?]|$)""").containsMatchIn(clean)
                 val reply = when {
                     confirm -> {
                         val tasks = pendingBatchTasks
@@ -324,6 +324,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun clearConversation() {
+        pendingBatchTasks = emptyList()
         _conversationState.value = com.example.service.conversation.ConversationState()
         _chatMessages.value = listOf(initialWelcomeMessage)
     }
