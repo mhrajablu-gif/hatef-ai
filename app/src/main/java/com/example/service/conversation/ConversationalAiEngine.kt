@@ -1349,7 +1349,9 @@ class ConversationalAiEngine(
             clarificationQuestion = analysis.clarificationQuestion,
             hasExplicitTitle = true,
             hasExplicitTime = analysis.targetTimestamp != null,
-            hasExplicitDate = analysis.targetTimestamp != null
+            hasExplicitDate = analysis.targetTimestamp != null,
+            repeatType = analysis.repeatType,
+            recurrenceDaysOfWeek = analysis.recurrenceDaysOfWeek
         )
 
         if (isAmbiguous) {
