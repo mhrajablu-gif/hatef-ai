@@ -281,7 +281,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .findAll(clean).count()
             if (schedulingCueCount >= 2) {
                 val tasks = aiParser.parseCommand(clean)
-                if (tasks.size >= 2 && tasks.all { !it.needsClarification && it.title.isNotBlank() && it.triggerTimestamp > System.currentTimeMillis() }) {
+                if (tasks.size >= 2 && tasks.all {
+                    it.hasExplicitTitle && it.title.isNotBlank() && it.hasExplicitTime &&
+                        (it.hasExplicitDate || it.repeatType != "NONE") && !it.isAmbiguous &&
+                        it.clarificationQuestion == null && it.triggerTimestamp > System.currentTimeMillis()
+                }) {
                     pendingBatchTasks = tasks
                     val preview = tasks.mapIndexed { index, task ->
                         "${index + 1}. ${task.title} — ${task.jalaliDateText} ساعت ${task.timeText}"
