@@ -38,7 +38,8 @@ data class AnalyzedCommandResult(
     val quickSuggestions: List<String>,
     val category: String = "عمومی",
     val priority: Int = 0,
-    val repeatType: String = "NONE"
+    val repeatType: String = "NONE",
+    val recurrenceDaysOfWeek: String? = null
 )
 
 object PersianCommandAnalyzer {
@@ -72,8 +73,11 @@ object PersianCommandAnalyzer {
         // 4. Extract Clock Time (Hour & Minute)
         val timeExtraction = extractClockTime(normalizedEnglish)
 
-        // 5. Extract Date / Weekday
-        val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone)
+        // Recurrence is parsed independently from the next occurrence date.
+        val recurrence = detectRecurrence(normalizedEnglish)
+
+        // Excluded weekdays must not become one-off target dates.
+        val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone, recurrence.excludedWeekdays)
 
         // 6. Detect Ambiguity in Hour (e.g. "ساعت ۶" without morning/evening)
         val isHourAmbiguous = timeExtraction.hasExplicitHour && !timeExtraction.isPeriodSpecified && timeExtraction.rawHour in 1..11
@@ -150,6 +154,10 @@ object PersianCommandAnalyzer {
                 targetTimestamp = cal.timeInMillis
             }
 
+            if (targetTimestamp != null && recurrence.daysOfWeek.isNotEmpty()) {
+                targetTimestamp = moveToNextAllowedWeekday(targetTimestamp, recurrence.daysOfWeek, timeZone)
+            }
+
             if (targetTimestamp != null) {
                 calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)
                 val jDate = PersianDateEngine.timestampToJalali(targetTimestamp, timeZone)
@@ -208,12 +216,7 @@ object PersianCommandAnalyzer {
             else -> 0
         }
 
-        val repeat = when {
-            clean.contains("هر روز") || clean.contains("روزانه") -> "DAILY"
-            clean.contains("هر هفته") || clean.contains("هفتگی") || clean.contains("هر جمعه") -> "WEEKLY"
-            clean.contains("هر ماه") || clean.contains("ماهانه") -> "MONTHLY"
-            else -> "NONE"
-        }
+        val repeat = recurrence.repeatType
 
         val category = when {
             clean.contains("جلسه") || clean.contains("قرارداد") || clean.contains("پروژه") || clean.contains("شرکت") || clean.contains("کار") -> "کاری"
@@ -244,7 +247,8 @@ object PersianCommandAnalyzer {
             quickSuggestions = suggestions,
             category = category,
             priority = priority,
-            repeatType = repeat
+            repeatType = repeat,
+            recurrenceDaysOfWeek = recurrence.daysOfWeek.takeIf { it.isNotEmpty() }?.joinToString(",")
         )
     }
 
@@ -536,10 +540,49 @@ object PersianCommandAnalyzer {
         val conflictMessage: String? = null
     )
 
+    private data class RecurrenceInfo(val repeatType: String, val daysOfWeek: Set<String> = emptySet(), val excludedWeekdays: Set<String> = emptySet())
+
+    /** Parse Persian weekly/daily recurrence without treating excluded weekdays as one-off dates. */
+    private fun detectRecurrence(input: String): RecurrenceInfo {
+        val text = normalizeText(input)
+        val weekdayNames = listOf("چهارشنبه", "پنجشنبه", "سه‌شنبه", "یکشنبه", "دوشنبه", "جمعه", "شنبه")
+        val tokenByWeekday = mapOf("شنبه" to "SAT", "یکشنبه" to "SUN", "دوشنبه" to "MON", "سه‌شنبه" to "TUE", "چهارشنبه" to "WED", "پنجشنبه" to "THU", "جمعه" to "FRI")
+        val excluded = linkedSetOf<String>()
+        val exclusionRegex = Regex("""(?:به\s*جز|غیر\s*از|به\s*استثنای)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|سه\s*شنبه|چهارشنبه|پنجشنبه|پنج‌شنبه|جمعه)""")
+        exclusionRegex.findAll(text).forEach { match -> excluded.add(normalizeWeekday(match.groupValues[1].replace(" ", ""))) }
+        val mentioned = linkedSetOf<String>()
+        weekdayNames.forEach { day -> if (text.contains(day)) mentioned.add(day) }
+        val allowed = (weekdayNames.toSet() - excluded).mapNotNull { tokenByWeekday[it] }.toSet()
+        val mentionedAllowed = (mentioned - excluded).mapNotNull { tokenByWeekday[it] }.toSet()
+        return when {
+            (text.contains("هر روز") || text.contains("روزانه")) && excluded.isNotEmpty() -> RecurrenceInfo("CUSTOM", allowed, excluded)
+            text.contains("هر روز") || text.contains("روزانه") -> RecurrenceInfo("DAILY", emptySet(), excluded)
+            text.contains("هر ماه") || text.contains("ماهانه") -> RecurrenceInfo("MONTHLY", emptySet(), excluded)
+            text.contains("هر هفته") || text.contains("هفتگی") || weekdayNames.any { text.contains("هر $it") } -> RecurrenceInfo("WEEKLY", mentionedAllowed, excluded)
+            excluded.isNotEmpty() -> RecurrenceInfo("CUSTOM", allowed, excluded)
+            else -> RecurrenceInfo("NONE")
+        }
+    }
+
+    private fun moveToNextAllowedWeekday(timestamp: Long, allowedTokens: Set<String>, timeZone: TimeZone): Long {
+        if (allowedTokens.isEmpty()) return timestamp
+        val cal = Calendar.getInstance(timeZone).apply { timeInMillis = timestamp }
+        repeat(8) {
+            val token = when (cal.get(Calendar.DAY_OF_WEEK)) {
+                Calendar.SATURDAY -> "SAT"; Calendar.SUNDAY -> "SUN"; Calendar.MONDAY -> "MON";
+                Calendar.TUESDAY -> "TUE"; Calendar.WEDNESDAY -> "WED"; Calendar.THURSDAY -> "THU";
+                Calendar.FRIDAY -> "FRI"; else -> ""
+            }
+            if (token in allowedTokens) return cal.timeInMillis
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return timestamp
+    }
     private fun extractDate(
         clean: String,
         referenceTimeMillis: Long,
-        timeZone: TimeZone
+        timeZone: TimeZone,
+        excludedWeekdays: Set<String> = emptySet()
     ): ExtractedDate {
         var dayOffset: Int? = null
         var exactY: Int? = null
@@ -583,6 +626,7 @@ object PersianCommandAnalyzer {
         )
 
         for (w in orderedWeekdays) {
+            if (normalizeWeekday(w) in excludedWeekdays) continue
             if (clean.contains(w)) {
                 val canonicalWd = normalizeWeekday(w)
                 reqWeekday = canonicalWd
