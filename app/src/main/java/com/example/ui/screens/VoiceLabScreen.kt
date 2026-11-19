@@ -138,7 +138,7 @@ fun VoiceLabScreen(
     fun addLog(msg: String, isError: Boolean = false) {
         val t = timeFormat.format(Date())
         eventLogs.add(0, LogEvent(t, msg, isError))
-        if (eventLogs.size > 80) eventLogs.removeLast()
+        if (eventLogs.size > 80) eventLogs.removeAt(eventLogs.lastIndex)
     }
 
     fun stopActiveSession() {

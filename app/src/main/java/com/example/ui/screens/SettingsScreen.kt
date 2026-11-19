@@ -1,10 +1,17 @@
 package com.example.ui.screens
 
+import com.example.BuildConfig
+
 import android.app.Activity
+import android.app.AlarmManager
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -52,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,6 +78,39 @@ fun SettingsScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    var appCheckDebugToken by remember {
+        mutableStateOf(com.example.service.ai.getStoredAppCheckDebugToken(context))
+    }
+    val firebaseProjectId = remember { com.example.service.ai.getFirebaseProjectId(context) }
+    val alarmManager = remember { context.getSystemService(Context.ALARM_SERVICE) as AlarmManager }
+    var exactAlarmAllowed by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+        )
+    }
+    val exactAlarmSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        exactAlarmAllowed =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+    }
+    val notificationManager = remember {
+        context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    }
+    var fullScreenIntentAllowed by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+                notificationManager.canUseFullScreenIntent()
+        )
+    }
+    val fullScreenSettingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        fullScreenIntentAllowed =
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+                notificationManager.canUseFullScreenIntent()
+    }
     val themeMode by viewModel.themeMode.collectAsState()
 
     val soundPrefs = remember { AlarmSoundPreferences(context) }
@@ -135,7 +177,7 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "نسخه ۱.۰۴ | موتور تقویم، گفتار پیوسته و آلارم تمام صفحه",
+                            text = "نسخه ${BuildConfig.VERSION_NAME} | موتور تقویم، گفتار پیوسته و آلارم تمام صفحه",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -179,6 +221,74 @@ fun SettingsScreen(
                             onClick = { viewModel.setThemeMode(com.example.ui.theme.ThemeMode.SYSTEM) },
                             modifier = Modifier.weight(1f)
                         )
+                    }
+                }
+            }
+        }
+
+        // Section: Exact alarm access
+        item {
+            SectionCard(
+                title = "مجوز هشدار دقیق",
+                icon = Icons.Filled.Notifications
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = if (exactAlarmAllowed) {
+                            "مجوز هشدار دقیق فعال است؛ یادآورها می‌توانند در زمان تعیین‌شده اجرا شوند."
+                        } else {
+                            "برای اجرای یادآورها در ساعت دقیق، اجازه «هشدارها و یادآورها» را در تنظیمات اندروید فعال کنید. بدون این اجازه، برنامه زمان هشدار را به‌صورت تقریبی جایگزین نمی‌کند."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                    if (!exactAlarmAllowed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        Button(
+                            onClick = {
+                                val requestIntent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                exactAlarmSettingsLauncher.launch(requestIntent)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("فعال‌سازی هشدار دقیق")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Full-screen alarm access
+        item {
+            SectionCard(
+                title = "نمایش هشدار روی صفحه قفل",
+                icon = Icons.Filled.Fullscreen
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = if (fullScreenIntentAllowed) {
+                            "اجازه نمایش تمام‌صفحه هشدارها فعال است."
+                        } else {
+                            "اعلان هشدار همچنان می‌تواند نمایش داده شود، اما برای بازشدن صفحه تمام‌صفحه هنگام قفل بودن گوشی، این اجازه لازم است."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    )
+                    if (!fullScreenIntentAllowed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        OutlinedButton(
+                            onClick = {
+                                val requestIntent = Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                fullScreenSettingsLauncher.launch(requestIntent)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("فعال‌سازی نمایش تمام‌صفحه")
+                        }
                     }
                 }
             }
@@ -350,6 +460,57 @@ fun SettingsScreen(
                         title = "کنترل ضبط صوت (Push-to-Talk)",
                         desc = "صدا صرفاً زمانی که دکمه میکروفون فشرده نگه داشته شده ضبط می‌شود و با رها کردن فوراً متوقف می‌گردد."
                     )
+                }
+            }
+        }
+
+        // Local-only App Check diagnostics for this debug APK. The token is never embedded in the APK.
+        if (BuildConfig.DEBUG) {
+            item {
+                SectionCard(
+                    title = "عیب‌یابی اتصال هوش مصنوعی",
+                    icon = Icons.Filled.Security
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TechRow(label = "شناسه برنامه:", value = BuildConfig.APPLICATION_ID)
+                        TechRow(label = "پروژه Firebase:", value = firebaseProjectId ?: "نامشخص")
+                        Text(
+                            text = appCheckDebugToken?.let {
+                                "توکن Debug ذخیره‌شده: ${it.take(6)}••••${it.takeLast(4)}"
+                            } ?: "هنوز توکن Debug روی دستگاه ذخیره نشده است.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    appCheckDebugToken = com.example.service.ai.getStoredAppCheckDebugToken(context)
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("بازخوانی توکن")
+                            }
+                            Button(
+                                onClick = {
+                                    appCheckDebugToken?.let {
+                                        clipboardManager.setText(AnnotatedString(it))
+                                    }
+                                },
+                                enabled = !appCheckDebugToken.isNullOrBlank(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("کپی توکن")
+                            }
+                        }
+                        Text(
+                            text = "اگر خطای «App Check token is invalid» می‌بینید، این توکن را فقط در بخش App Check → Debug tokens همان پروژه و برنامهٔ اندرویدی بالا ثبت کنید. توکن را در گفتگو یا برای دیگران ارسال نکنید.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
+                        )
+                    }
                 }
             }
         }

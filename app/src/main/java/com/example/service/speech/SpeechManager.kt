@@ -368,7 +368,7 @@ class SpeechManager(private val context: Context) {
         )
         val list = _auditLogs.value.toMutableList()
         list.add(0, audit)
-        if (list.size > 50) list.removeLast()
+        if (list.size > 50) list.removeAt(list.lastIndex)
         _auditLogs.value = list
     }
 

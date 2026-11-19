@@ -31,8 +31,23 @@ data class ParsedTask(
     val quickSuggestions: List<String> = emptyList(),
     val analyzedResult: AnalyzedCommandResult? = null
 ) {
+    val hasResolvedRelativeDateTime: Boolean
+        get() = rawTimePhrase.isRelativeDateTimePhrase()
+
+    val hasAmbiguousTimePeriod: Boolean
+        get() = analyzedResult?.ambiguousFields?.contains("HOUR_PERIOD_AM_PM") == true ||
+            isAmbiguous
+
     val needsClarification: Boolean
-        get() = clarificationQuestion != null || isAmbiguous || !hasExplicitTitle || (!hasExplicitTime && !hasExplicitDate)
+        get() = clarificationQuestion != null || isAmbiguous || hasAmbiguousTimePeriod || !hasExplicitTitle ||
+            !hasExplicitTime || (!hasExplicitDate && !hasResolvedRelativeDateTime)
+}
+
+private fun String.isRelativeDateTimePhrase(): Boolean {
+    val phrase = this
+    val hasRelativeMarker = phrase.contains("دیگه") || phrase.contains("بعد") || phrase.contains("دیگر")
+    val hasDurationUnit = phrase.contains("دقیقه") || phrase.contains("ساعت")
+    return hasRelativeMarker && hasDurationUnit
 }
 
 class GeminiSemanticParser {
@@ -48,15 +63,25 @@ class GeminiSemanticParser {
     }
 
     /**
-     * Parses Persian spoken text or mind-dump into one or more structured tasks.
-     * Uses 100% offline, local rule-based Persian NLP parsing (Zero Cost, No Paid APIs).
+     * Parses Persian speech with Gemini when Firebase AI Logic is configured.
+     * The local parser remains the deterministic offline fallback.
      */
     suspend fun parseCommand(userSpeech: String, referenceTimeMillis: Long = System.currentTimeMillis()): List<ParsedTask> {
         val cleanSpeech = userSpeech.trim()
         if (cleanSpeech.isBlank()) return emptyList()
 
-        // 100% Offline, Local, Free, and Instant
-        return LocalPersianParser.parse(cleanSpeech, referenceTimeMillis)
+        return try {
+            withTimeout(12_000L) {
+                parseWithGemini(cleanSpeech, referenceTimeMillis)
+            }.ifEmpty {
+                LocalPersianParser.parse(cleanSpeech, referenceTimeMillis)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Gemini semantic parsing failed; using local Persian parser: ${e.message}", e)
+            LocalPersianParser.parse(cleanSpeech, referenceTimeMillis)
+        }
     }
 
     private suspend fun parseWithGemini(userSpeech: String, referenceTimeMillis: Long): List<ParsedTask> {
@@ -70,6 +95,9 @@ class GeminiSemanticParser {
 
         cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
         val dayAfterTomorrowJalali = PersianDateEngine.timestampToJalali(cal.timeInMillis)
+
+        cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+        val threeDaysLaterJalali = PersianDateEngine.timestampToJalali(cal.timeInMillis)
 
         val prompt = """
             You are an expert Persian NLP task extraction and calendar assistant for the "یادت" application.
@@ -89,8 +117,11 @@ class GeminiSemanticParser {
                - "پس فردا" or "پس‌فردا" -> MUST set: targetJalaliYear=${dayAfterTomorrowJalali.year}, targetJalaliMonth=${dayAfterTomorrowJalali.month}, targetJalaliDay=${dayAfterTomorrowJalali.day}.
                - "فردا" -> MUST set: targetJalaliYear=${tomorrowJalali.year}, targetJalaliMonth=${tomorrowJalali.month}, targetJalaliDay=${tomorrowJalali.day}.
                - "امروز" -> MUST set: targetJalaliYear=${curJalali.year}, targetJalaliMonth=${curJalali.month}, targetJalaliDay=${curJalali.day}.
+               - "سه روز دیگه" / "سه روز بعد" / "3 روز دیگر" -> MUST set: targetJalaliYear=${threeDaysLaterJalali.year}, targetJalaliMonth=${threeDaysLaterJalali.month}, targetJalaliDay=${threeDaysLaterJalali.day}.
+               - For any other explicit "N روز دیگر/بعد/دیگه", calculate the date by adding exactly N calendar days to TODAY; never reinterpret a multi-day offset as tomorrow.
             3. Hour Resolution:
-               - If user specifies an hour like "ساعت ۳" without morning/night, for reminders and appointments assume daytime 15:00 (targetHour: 15, targetMinute: 0).
+               - NEVER guess morning or evening when the user says an hour from 1 to 11 without a period.
+               - In that case set isAmbiguous=true, preserve the stated hour in targetHour, and ask a concise clarification such as "منظورتان ساعت ۱۰ صبح است یا ۱۰ شب؟".
                - "ساعت ۳ بعدازظهر" / "ساعت ۳ عصر" -> targetHour: 15, targetMinute: 0.
                - "ساعت ۳ صبح" / "۳ بامداد" -> targetHour: 3, targetMinute: 0.
                - "ساعت ۹ صبح" -> targetHour: 9, targetMinute: 0.
@@ -116,8 +147,14 @@ class GeminiSemanticParser {
                - "advanceAlertMinutes": Integer (e.g. 15, 30, or 0)
                - "priority": 0 for normal, 1 for important ("مهم"), 2 for urgent ("فوری")
                - "category": One of "کاری", "شخصی", "سلامت", "خرید", "عمومی"
+               - "hasExplicitDate": Boolean; true ONLY if the user explicitly supplied a date or relative day
+               - "hasExplicitTime": Boolean; true ONLY if the user explicitly supplied a clock time or relative duration
+               - "hasExplicitTitle": Boolean; true ONLY if an actual task/action title was understood
                - "isAmbiguous": Boolean
                - "clarificationQuestion": String or null
+               - NEVER infer a missing date, time, or task title. For a missing date, use TODAY only as a temporary placeholder and set hasExplicitDate=false.
+               - For a missing time, use the current reference time only as a temporary placeholder and set hasExplicitTime=false.
+               - Do not turn a past time today into tomorrow unless the user explicitly says tomorrow.
 
             Respond ONLY with a JSON object:
             {
@@ -156,23 +193,20 @@ class GeminiSemanticParser {
                 val tYear = obj.optInt("targetJalaliYear", curJalali.year)
                 val tMonth = obj.optInt("targetJalaliMonth", curJalali.month)
                 val tDay = obj.optInt("targetJalaliDay", curJalali.day)
-                val tHour = obj.optInt("targetHour", 9)
-                val tMin = obj.optInt("targetMinute", 0)
+                val tHour = obj.optInt("targetHour", curJalali.hour)
+                val tMin = obj.optInt("targetMinute", curJalali.minute)
 
                 targetMillis = PersianDateEngine.jalaliToTimestamp(tYear, tMonth, tDay, tHour, tMin)
-                if (targetMillis < referenceTimeMillis && tYear == curJalali.year && obj.isNull("targetJalaliYear")) {
-                    // Passed time today, assume tomorrow
-                    targetMillis += 24 * 3600 * 1000L
-                }
             }
 
             val targetJalali = PersianDateEngine.timestampToJalali(targetMillis)
             val jalaliText = targetJalali.formatPersianNumeric()
             val timeText = PersianDateEngine.formatPersianTime(targetJalali.hour, targetJalali.minute)
 
-            val hasExplicitTime = obj.optBoolean("hasExplicitTime", true)
-            val hasExplicitDate = obj.optBoolean("hasExplicitDate", true)
-            val hasExplicitTitle = obj.optBoolean("hasExplicitTitle", true) && title.isNotBlank() && !title.startsWith("یادآوری ساعت")
+            val hasRelativeOffset = offsetMins != null && offsetMins > 0
+            val hasExplicitTime = obj.optBoolean("hasExplicitTime", false) || hasRelativeOffset
+            val hasExplicitDate = obj.optBoolean("hasExplicitDate", false) || hasRelativeOffset
+            val hasExplicitTitle = obj.optBoolean("hasExplicitTitle", false) && title.isNotBlank() && !title.startsWith("یادآوری ساعت")
 
             results.add(
                 ParsedTask(
@@ -189,7 +223,7 @@ class GeminiSemanticParser {
                     hasExplicitTime = hasExplicitTime,
                     hasExplicitDate = hasExplicitDate,
                     hasExplicitTitle = hasExplicitTitle,
-                    isAmbiguous = isAmbiguous || question != null,
+                    isAmbiguous = isAmbiguous,
                     clarificationQuestion = question
                 )
             )
@@ -217,6 +251,9 @@ class GeminiSemanticParser {
 
     private fun parseSingleSegment(segment: String, referenceTimeMillis: Long): ParsedTask {
         val extracted = PersianDateEngine.extractPersianTask(segment, referenceTimeMillis)
+        val analysis = PersianCommandAnalyzer.analyze(segment, referenceTimeMillis)
+        val resolvedTimestamp = analysis.targetTimestamp ?: extracted.triggerTimestamp
+        val jalali = PersianDateEngine.timestampToJalali(resolvedTimestamp)
 
         val priority = when {
             segment.contains("فوری") || segment.contains("خیلی مهم") -> 2
@@ -247,12 +284,15 @@ class GeminiSemanticParser {
         }
 
         val hasExplicitTitle = extracted.hasExplicitTitle
-        val hasExplicitTime = extracted.hasExplicitTime
-        val hasExplicitDate = extracted.hasExplicitDate
+        val hasRelativeDateTime = extracted.rawTimePhrase.isRelativeDateTimePhrase()
+        val hasExplicitTime = analysis.hasExplicitTime || hasRelativeDateTime
+        val hasExplicitDate = analysis.hasExplicitDate || hasRelativeDateTime
+        val hasAmbiguousTimePeriod = analysis.ambiguousFields.contains("HOUR_PERIOD_AM_PM")
 
         val clarification = when {
-            !hasExplicitTime && !hasExplicitDate -> "ساعت یا تاریخ برای یادآوری «${extracted.title}» مشخص نشده است؛ مایلید چه زمانی یادآوری شود؟"
-            !hasExplicitTitle -> "زمان یادآوری روی ${extracted.jalaliDateText} ساعت ${extracted.timeText} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
+            hasAmbiguousTimePeriod -> "منظورتان ساعت ${extracted.timeText.substringBefore(":")} صبح است یا شب؟"
+            !hasExplicitTime || !hasExplicitDate -> "برای یادآوری «${extracted.title}»، ${if (!hasExplicitDate && !hasExplicitTime) "تاریخ و ساعت" else if (!hasExplicitDate) "تاریخ" else "ساعت"} مشخص نشده است؛ لطفاً آن را تعیین کنید."
+            !hasExplicitTitle -> "زمان یادآوری روی ${jalali.formatPersianNumeric()} ساعت ${PersianDateEngine.formatPersianTime(jalali.hour, jalali.minute)} مشخص شد. لطفاً عنوان یا موضوع این یادآوری را بفرمایید:"
             else -> null
         }
 
@@ -260,9 +300,9 @@ class GeminiSemanticParser {
             title = extracted.title.capitalizeFirstLetter(),
             description = segment,
             rawTimePhrase = extracted.rawTimePhrase,
-            triggerTimestamp = extracted.triggerTimestamp,
-            jalaliDateText = extracted.jalaliDateText,
-            timeText = extracted.timeText,
+            triggerTimestamp = resolvedTimestamp,
+            jalaliDateText = analysis.jalaliDateText ?: jalali.formatPersianNumeric(),
+            timeText = PersianDateEngine.formatPersianTime(jalali.hour, jalali.minute),
             category = category,
             priority = priority,
             repeatType = repeat,
@@ -270,8 +310,9 @@ class GeminiSemanticParser {
             hasExplicitTime = hasExplicitTime,
             hasExplicitDate = hasExplicitDate,
             hasExplicitTitle = hasExplicitTitle,
-            isAmbiguous = clarification != null,
-            clarificationQuestion = clarification
+            isAmbiguous = hasAmbiguousTimePeriod,
+            clarificationQuestion = clarification,
+            analyzedResult = analysis
         )
     }
 
