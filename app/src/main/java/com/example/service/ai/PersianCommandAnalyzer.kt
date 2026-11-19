@@ -544,7 +544,7 @@ object PersianCommandAnalyzer {
 
     /** Parse Persian weekly/daily recurrence without treating excluded weekdays as one-off dates. */
     private fun detectRecurrence(input: String): RecurrenceInfo {
-        val text = normalizeText(input)
+        val text = normalizeText(input).replace("به‌جز", "به جز").replace("غیر‌از", "غیر از")
         val weekdayNames = listOf("چهارشنبه", "پنجشنبه", "سه‌شنبه", "یکشنبه", "دوشنبه", "جمعه", "شنبه")
         val tokenByWeekday = mapOf("شنبه" to "SAT", "یکشنبه" to "SUN", "دوشنبه" to "MON", "سه‌شنبه" to "TUE", "چهارشنبه" to "WED", "پنجشنبه" to "THU", "جمعه" to "FRI")
         val excluded = linkedSetOf<String>()
@@ -760,6 +760,7 @@ object PersianCommandAnalyzer {
 
         // Remove conversational time words and weekdays
         t = t.replace(Regex("""(?:امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
+        t = t.replace(Regex("""(?:هر\s+روز|روزانه|هر\s+هفته|هفتگی|هر\s+ماه|ماهانه|به\s*جز\s*(?:شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?)"""), " ")
         t = t.replace(Regex("""(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
         t = t.replace(Regex("""ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{1,2})?\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)?"""), " ")
         t = t.replace(Regex("""[\d۰-۹]{1,2}\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)"""), " ")
