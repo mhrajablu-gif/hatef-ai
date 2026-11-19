@@ -19,8 +19,19 @@ object LocalPersianParser {
         ).map { it.trim().trim('،', ' ', '.') }.filter { it.isNotBlank() }
 
         val tasks = mutableListOf<ParsedTask>()
+        var inheritedDateContext: String? = null
+        val dateContextPattern = Regex("""(?:پس[\s‌]?فردا|فردا|امروز|هفته\s+(?:بعد|آینده)|چهارشنبه|پنجشنبه|پنج‌شنبه|سه‌شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه|[\d۰-۹]{1,2}\s*(?:فروردین|اردیبهشت|خرداد|تیر|مرداد|شهریور|مهر|آبان|آذر|دی|بهمن|اسفند))""")
         for (segment in segments) {
-            tasks.add(parseSingleCommand(segment, referenceTimeMillis))
+            val initial = parseSingleCommand(segment, referenceTimeMillis)
+            val effectiveSegment = if (!initial.hasExplicitDate && initial.hasExplicitTime && inheritedDateContext != null) {
+                "${inheritedDateContext} $segment"
+            } else {
+                segment
+            }
+            val task = if (effectiveSegment == segment) initial else parseSingleCommand(effectiveSegment, referenceTimeMillis)
+            tasks.add(task)
+            val dateMatch = dateContextPattern.find(segment)
+            if (dateMatch != null) inheritedDateContext = dateMatch.value
         }
         return tasks
     }
