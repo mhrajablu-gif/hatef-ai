@@ -1547,7 +1547,17 @@ class ConversationalAiEngine(
             !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement &&
             !clean.contains("?") && !clean.contains("؟")
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry || isImplicitTimedPlan) {
+        // A clearly recurring, timed activity is an actionable reminder plan even when the user
+        // does not append an imperative such as "یادم بنداز" (including exercise/study routines).
+        val hasRecurringCadence = listOf("هر روز", "روزانه", "هر هفته", "هفتگی", "هر ماه", "ماهانه")
+            .any { clean.contains(it) }
+        val hasRecurringAction = hasActionVerb || clean.endsWith("کنم") ||
+            listOf("ورزش", "تمرین", "مطالعه", "درس", "جلسه", "تماس").any { clean.contains(it) }
+        val isImplicitRecurringTimedPlan = hasRecurringCadence && hasTimeExpression && hasRecurringAction &&
+            !isEmotionalOrPhysiological && !clean.contains("?") && !clean.contains("؟")
+
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry ||
+            isImplicitTimedPlan || isImplicitRecurringTimedPlan) {
             return true
         }
 
