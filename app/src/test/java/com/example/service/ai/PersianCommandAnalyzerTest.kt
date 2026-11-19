@@ -285,4 +285,48 @@ class PersianCommandAnalyzerTest {
         assertEquals(19, result3.hour)
         assertEquals(30, result3.minute)
     }
+
+    @Test
+    fun weeklyWednesdayIsStoredAsARecurringWeekdayNotOneOffReminder() {
+        val result = PersianCommandAnalyzer.analyze(
+            "هر هفته چهارشنبه‌ها ساعت ۸ صبح ورزش کنم",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertEquals("WEEKLY", result.repeatType)
+        assertEquals("WED", result.recurrenceDaysOfWeek)
+        assertEquals("چهارشنبه", result.calculatedWeekday)
+        assertTrue(result.title.contains("ورزش"))
+        assertFalse(result.title.contains("هر هفته"))
+    }
+
+    @Test
+    fun dailyExceptFridayUsesAllOtherWeekdaysAndDoesNotScheduleFriday() {
+        val result = PersianCommandAnalyzer.analyze(
+            "هر روز به جز جمعه‌ها ساعت ۷ صبح ورزش کنم",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertEquals("CUSTOM", result.repeatType)
+        assertEquals(setOf("SAT", "SUN", "MON", "TUE", "WED", "THU"), result.recurrenceDaysOfWeek?.split(",")?.toSet())
+        assertEquals("سه‌شنبه", result.calculatedWeekday)
+        assertTrue(result.title.contains("ورزش"))
+        assertFalse(result.title.contains("جمعه"))
+    }
+
+    @Test
+    fun localParserSplitsTwoIndependentlyTimedReminders() {
+        val tasks = LocalPersianParser.parse(
+            "فردا ساعت ۹ بانک برم و پس‌فردا ساعت ۱۰ خرید کنم",
+            baseTime
+        )
+
+        assertEquals(2, tasks.size)
+        assertTrue(tasks[0].title.contains("بانک"))
+        assertTrue(tasks[1].title.contains("خرید"))
+        assertTrue(tasks.all { it.hasExplicitTime && it.hasExplicitDate })
+    }
+
 }
