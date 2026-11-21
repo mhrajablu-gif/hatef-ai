@@ -13,10 +13,12 @@ object LocalPersianParser {
         val clean = text.trim()
         if (clean.isBlank()) return emptyList()
 
-        // Handle mind-dump / multi-task separated by "و همچنین", "سپس", "بعدش", or "،"
-        val segments = clean.split(
-            Regex("""(?<=[،\n])|\s+و\s+(?:همچنین\s+)?(?=(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌_]?فردا|پسفردا|فردا|امروز|سال آینده|پنج دقیقه|یک ربع|نیم ساعت|هر|ساعت))|(?<!تا)(?<!الی)\s+(?=ساعت\s*[0-9۰-۹]{1,2}(?![0-9۰-۹]))""")
+        // First split explicit separators, then split only later independent clock cues.
+        // This avoids treating the first "از ساعت..." as a new task or splitting "تا ساعت ۸" ranges.
+        val separatedSegments = clean.split(
+            Regex("""(?<=[،\n])|\s+و\s+(?:همچنین\s+)?(?=(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌]?فردا|پسفردا|فردا|امروز|سال آینده|پنج دقیقه|یک ربع|نیم ساعت|هر|ساعت))""")
         ).map { it.trim().trim('،', ' ', '.') }.filter { it.isNotBlank() }
+        val segments = separatedSegments.flatMap { splitAtSubsequentClockTimes(it) }
 
         val tasks = mutableListOf<ParsedTask>()
         var inheritedDateContext: String? = null
@@ -36,6 +38,29 @@ object LocalPersianParser {
             if (dateMatch != null) inheritedDateContext = dateMatch.value
         }
         return tasks
+    }
+
+
+    private fun splitAtSubsequentClockTimes(segment: String): List<String> {
+        val clockPattern = Regex("""ساعت\s*[0-9۰-۹]{1,2}(?![0-9۰-۹])""")
+        val matches = clockPattern.findAll(segment).toList()
+        if (matches.size < 2) return listOf(segment)
+
+        val boundaries = matches.drop(1).filter { match ->
+            val prefix = segment.substring(0, match.range.first).trimEnd()
+            !prefix.endsWith("تا") && !prefix.endsWith("الی")
+        }.map { it.range.first }
+
+        if (boundaries.isEmpty()) return listOf(segment)
+
+        val result = mutableListOf<String>()
+        var start = 0
+        for (boundary in boundaries) {
+            result.add(segment.substring(start, boundary).trim())
+            start = boundary
+        }
+        result.add(segment.substring(start).trim())
+        return result.filter { it.isNotBlank() }
     }
 
     private fun hasExplicitDatePhrase(input: String): Boolean {
