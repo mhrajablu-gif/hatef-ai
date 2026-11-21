@@ -13,16 +13,64 @@ object LocalPersianParser {
         val clean = text.trim()
         if (clean.isBlank()) return emptyList()
 
-        // Handle mind-dump / multi-task separated by "و همچنین", "سپس", "بعدش", or "،"
-        val segments = clean.split(
-            Regex("""(?<=[،\n])|\s+و\s+(?:همچنین\s+)?(?=(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌_]?فردا|پسفردا|فردا|امروز|سال آینده|پنج دقیقه|یک ربع|نیم ساعت|هر|ساعت))""")
+        // First split explicit separators, then split only later independent clock cues.
+        // This avoids treating the first "از ساعت..." as a new task or splitting "تا ساعت ۸" ranges.
+        val separatedSegments = clean.split(
+            Regex("""(?<=[،\n])|\s+و\s+(?:همچنین\s+)?(?=(?:پس[\s‌_]?اون[\s‌_]?فردا|پس[\s‌]?فردا|پسفردا|فردا|امروز|سال آینده|پنج دقیقه|یک ربع|نیم ساعت|هر|ساعت))""")
         ).map { it.trim().trim('،', ' ', '.') }.filter { it.isNotBlank() }
+        val segments = separatedSegments.flatMap { splitAtSubsequentClockTimes(it) }
 
         val tasks = mutableListOf<ParsedTask>()
+        var inheritedDateContext: String? = null
+        val dateContextPattern = Regex("""(?:پس[\s‌]?فردا|فردا|امروز|هفته\s+(?:بعد|آینده)|چهارشنبه|پنجشنبه|پنج‌شنبه|سه‌شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه|[\d۰-۹]{1,2}\s*(?:فروردین|اردیبهشت|خرداد|تیر|مرداد|شهریور|مهر|آبان|آذر|دی|بهمن|اسفند))""")
         for (segment in segments) {
-            tasks.add(parseSingleCommand(segment, referenceTimeMillis))
+            val initial = parseSingleCommand(segment, referenceTimeMillis)
+            val effectiveSegment = if (!initial.hasExplicitDate && initial.hasExplicitTime && inheritedDateContext != null) {
+                "${inheritedDateContext} $segment"
+            } else {
+                segment
+            }
+            val task = if (effectiveSegment == segment) initial else parseSingleCommand(effectiveSegment, referenceTimeMillis)
+            tasks.add(task)
+            val dateSearchText = PersianCommandAnalyzer.normalizeText(segment)
+                .replace(Regex("""(?:به\s*جز|به‌جز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""), " ")
+            val dateMatch = dateContextPattern.find(dateSearchText)
+            if (dateMatch != null) inheritedDateContext = dateMatch.value
         }
         return tasks
+    }
+
+
+    private fun splitAtSubsequentClockTimes(segment: String): List<String> {
+        val clockPattern = Regex("""ساعت\s*[0-9۰-۹]{1,2}(?![0-9۰-۹])""")
+        val matches = clockPattern.findAll(segment).toList()
+        if (matches.size < 2) return listOf(segment)
+
+        val boundaries = matches.drop(1).filter { match ->
+            val prefix = segment.substring(0, match.range.first).trimEnd()
+            !prefix.endsWith("تا") && !prefix.endsWith("الی")
+        }.map { it.range.first }
+
+        if (boundaries.isEmpty()) return listOf(segment)
+
+        val result = mutableListOf<String>()
+        var start = 0
+        for (boundary in boundaries) {
+            result.add(segment.substring(start, boundary).trim())
+            start = boundary
+        }
+        result.add(segment.substring(start).trim())
+        return result.filter { it.isNotBlank() }
+    }
+
+    private fun hasExplicitDatePhrase(input: String): Boolean {
+        val normalized = PersianCommandAnalyzer.normalizeText(input)
+        val withoutExcludedDays = normalized.replace(
+            Regex("""(?:به\s*جز|به‌جز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""),
+            " "
+        )
+        val datePattern = Regex("""(?:امروز|امشب|فردا|پس[\s‌]?فردا|پس\s+اون\s+فردا|هفته\s+(?:بعد|آینده)|چهارشنبه|پنجشنبه|پنج‌شنبه|سه‌شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه|[\d۰-۹]{1,2}\s*(?:فروردین|اردیبهشت|خرداد|تیر|مرداد|شهریور|مهر|آبان|آذر|دی|بهمن|اسفند))""")
+        return datePattern.containsMatchIn(withoutExcludedDays)
     }
 
     fun parseSingleCommand(rawSegment: String, referenceTimeMillis: Long = System.currentTimeMillis()): ParsedTask {
@@ -38,7 +86,7 @@ object LocalPersianParser {
         val dateText = analysis.jalaliDateText ?: jDate.formatPersianNumeric()
 
         val hasExplicitTime = analysis.hour != null
-        val hasExplicitDate = analysis.jalaliDateText != null
+        val hasExplicitDate = hasExplicitDatePhrase(rawSegment)
         val hasExplicitTitle = analysis.title.isNotBlank() && !analysis.title.startsWith("یادآوری ساعت")
 
         return ParsedTask(
@@ -51,6 +99,7 @@ object LocalPersianParser {
             category = analysis.category,
             priority = analysis.priority,
             repeatType = analysis.repeatType,
+            recurrenceDaysOfWeek = analysis.recurrenceDaysOfWeek,
             advanceAlertMinutes = 0,
             hasExplicitTime = hasExplicitTime,
             hasExplicitDate = hasExplicitDate,

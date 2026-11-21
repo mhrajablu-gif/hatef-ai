@@ -64,6 +64,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = ReminderRepository(db.reminderDao())
     private val speechManager = SpeechManager(application)
     private val aiParser = GeminiSemanticParser()
+    private var pendingBatchTasks: List<ParsedTask> = emptyList()
     private val themePreferences = com.example.ui.theme.ThemePreferences(application)
     private val ttsSpeaker = com.example.service.speech.TtsSpeaker(application)
 
@@ -76,12 +77,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val initialWelcomeMessage = com.example.service.conversation.ChatMessage(
         sender = com.example.service.conversation.MessageSender.ASSISTANT,
-        text = "سلام! من «یادت»، دستیار هوشمند شما هستم. می‌توانید هر سوالی درباره موضوعات مختلف (علمی، برنامه‌ریزی، فناوری و روزمره) بپرسید، یا دستوراتی مثل تنظیم، تغییر، جابجایی و حذف یادآورها («همه یادآورهام رو حذف کن») و تغییر تنظیمات برنامه را به من بگویید.",
+        text = "سلام! من دستیار مدیریت یادآورها و عادت‌های شما هستم. می‌توانید با زبان طبیعی و به‌صورت صوتی یا متنی، یادآور بسازید، زمان یا عنوانش را تغییر دهید، آن را جابه‌جا یا حذف کنید، برنامه‌های تکرارشونده بسازید و تنظیمات یادت را کنترل کنید. اگر اطلاعاتی مبهم یا ناقص باشد، قبل از اجرا از شما سؤال می‌پرسم.",
         suggestedReplies = listOf(
-            "همه یادآورهام رو حذف کن",
             "فردا ساعت ۱۰ یادم بنداز برم بانک",
-            "پوسته رو تاریک کن",
-            "تکنیک پومودورو چیه؟"
+            "هر روز به‌جز جمعه ساعت ۷ ورزش رو یادم بنداز",
+            "یادآورهای فردا رو نشون بده",
+            "پیش‌اعلان رو روی ۱۵ دقیقه بذار"
         )
     )
 
@@ -96,11 +97,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 if (state is VoiceState.Success && state.recognizedText.isNotBlank()) {
                     val recognized = state.recognizedText
                     speechManager.resetState()
-                    if (_uiState.value.isVoiceSheetOpen) {
+                    // The assistant tab has one conversation pipeline for both typed and spoken input.
+                    // Never route assistant-tab speech through the legacy one-shot command parser,
+                    // otherwise the recognized words bypass the visible chat history and lose context.
+                    if (_uiState.value.currentTab == NavTab.ASSISTANT || _uiState.value.isVoiceSheetOpen) {
                         sendChatMessage(recognized)
                     } else if (_uiState.value.activeClarification != null) {
                         provideClarification(recognized)
                     } else {
+                        // Preserve the existing quick-capture flow outside the assistant conversation.
                         parseSpokenCommand(recognized)
                     }
                 }
@@ -242,6 +247,61 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isAiParsing = true)
+
+            // If a batch preview is waiting, only an explicit confirmation can save it.
+            if (pendingBatchTasks.isNotEmpty()) {
+                val confirm = Regex("""^(بله|آره|اره|تأیید|تایید)(?:[\s،.!؟?]|$)""").containsMatchIn(clean)
+                val cancel = Regex("""^(نه|خیر|لغو|بی‌خیال)(?:[\s،.!؟?]|$)""").containsMatchIn(clean)
+                val reply = when {
+                    confirm -> {
+                        val tasks = pendingBatchTasks
+                        pendingBatchTasks = emptyList()
+                        val results = tasks.map { toolRegistry.createReminder(it) }
+                        results.joinToString("\n") { it.message }
+                    }
+                    cancel -> {
+                        pendingBatchTasks = emptyList()
+                        "ثبت یادآورها لغو شد."
+                    }
+                    else -> "برای ثبت همین ${pendingBatchTasks.size} یادآور، لطفاً «بله ثبت کن» یا «لغو» را بفرمایید."
+                }
+                val assistantMsg = com.example.service.conversation.ChatMessage(
+                    sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                    text = reply
+                )
+                _chatMessages.value = _chatMessages.value + assistantMsg
+                _uiState.value = _uiState.value.copy(isAiParsing = false)
+                ttsSpeaker.speak(reply)
+                return@launch
+            }
+
+            // The local parser already supports multiple independently timed segments.
+            // Use it before the single-draft conversation engine when a message clearly contains a batch.
+            val schedulingCueCount = Regex("""(?:ساعت\s*[\d۰-۹]{1,2}|فردا|پس\s*فردا|پسفردا|امروز|هر\s+روز|هر\s+هفته|یک\s+ربع|یه\s+ربع|نیم\s+ساعت)""")
+                .findAll(clean).count()
+            if (schedulingCueCount >= 2) {
+                val tasks = aiParser.parseCommand(clean)
+                if (tasks.size >= 2 && tasks.all {
+                    it.hasExplicitTitle && it.title.isNotBlank() && it.hasExplicitTime &&
+                        (it.hasExplicitDate || it.repeatType != "NONE") && !it.isAmbiguous &&
+                        it.clarificationQuestion == null && it.triggerTimestamp > System.currentTimeMillis()
+                }) {
+                    pendingBatchTasks = tasks
+                    val preview = tasks.mapIndexed { index, task ->
+                        "${index + 1}. ${task.title} — ${task.jalaliDateText} ساعت ${task.timeText}"
+                    }.joinToString("\n")
+                    val reply = "این جمله شامل ${tasks.size} یادآور مستقل است؛ آن‌ها را جداگانه تشخیص دادم:\n$preview\n\nآیا همه را ثبت کنم؟"
+                    val assistantMsg = com.example.service.conversation.ChatMessage(
+                        sender = com.example.service.conversation.MessageSender.ASSISTANT,
+                        text = reply
+                    )
+                    _chatMessages.value = _chatMessages.value + assistantMsg
+                    _uiState.value = _uiState.value.copy(isAiParsing = false)
+                    ttsSpeaker.speak(reply)
+                    return@launch
+                }
+            }
+
             val response = conversationalEngine.processTurn(
                 userInput = clean,
                 currentState = _conversationState.value,
@@ -249,29 +309,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
 
             _conversationState.value = response.newState
-
             val assistantMsg = com.example.service.conversation.ChatMessage(
                 sender = com.example.service.conversation.MessageSender.ASSISTANT,
                 text = response.replyText,
                 actionCard = response.actionCard,
                 suggestedReplies = response.suggestedReplies
             )
-
             _chatMessages.value = _chatMessages.value + assistantMsg
             _uiState.value = _uiState.value.copy(isAiParsing = false)
-
-            // Speak response via TTS
             ttsSpeaker.speak(response.replyText)
-
             if (response.executedResult != null && response.executedResult.success) {
-                _uiState.value = _uiState.value.copy(
-                    infoMessage = response.executedResult.message
-                )
+                _uiState.value = _uiState.value.copy(infoMessage = response.executedResult.message)
             }
         }
     }
-
     fun clearConversation() {
+        pendingBatchTasks = emptyList()
         _conversationState.value = com.example.service.conversation.ConversationState()
         _chatMessages.value = listOf(initialWelcomeMessage)
     }
@@ -495,6 +548,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 category = task.category,
                 priority = task.priority,
                 repeatType = task.repeatType,
+                recurrenceDaysOfWeek = task.recurrenceDaysOfWeek,
                 advanceAlertMinutes = task.advanceAlertMinutes
             )
 
@@ -534,6 +588,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     category = task.category,
                     priority = task.priority,
                     repeatType = task.repeatType,
+                    recurrenceDaysOfWeek = task.recurrenceDaysOfWeek,
                     advanceAlertMinutes = task.advanceAlertMinutes
                 )
                 val id = repository.insert(entity)
