@@ -343,4 +343,31 @@ class PersianCommandAnalyzerTest {
         assertEquals("۱۰:۰۰", tasks[1].timeText)
     }
 
+
+    @Test
+    fun localParserSplitsSecondTimedTaskWithoutConjunctionAndInheritsDate() {
+        val tasks = LocalPersianParser.parse(
+            "فردا ساعت ۱۰ برم نون بخرم ساعت ۱۴ هم برم سرکار",
+            baseTime
+        )
+
+        assertEquals(2, tasks.size)
+        assertEquals("۱۰:۰۰", tasks[0].timeText)
+        assertEquals("۱۴:۰۰", tasks[1].timeText)
+        assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
+        assertTrue(tasks[0].title.contains("نون") || tasks[0].title.contains("نان"))
+        assertTrue(tasks[1].title.contains("کار"))
+        assertTrue(tasks.all { it.hasExplicitTime && it.hasExplicitDate })
+    }
+
+    @Test
+    fun localParserDoesNotSplitTimeRangeIntoTwoReminders() {
+        val tasks = LocalPersianParser.parse(
+            "فردا از ساعت ۷ تا ساعت ۸ کار کنم",
+            baseTime
+        )
+
+        assertEquals(1, tasks.size)
+    }
+
 }
