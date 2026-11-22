@@ -50,7 +50,12 @@ jobs:
             echo "::error::Could not read SHA-256 fingerprint from the stable keystore."
             exit 1
           fi
-          echo "Stable keystore SHA-256: $KEYSTORE_CERT_SHA256"
+          EXPECTED_INSTALL_CERT_SHA256="6666fb9574b390cf2d6593ef816ef45a79a604fc2fbeb7131c8c3c072b3448f4"
+          if [ "$KEYSTORE_CERT_SHA256" != "$EXPECTED_INSTALL_CERT_SHA256" ]; then
+            echo "::error::Signing certificate does not match the previously installed Yadet app. Refusing to build an APK that cannot update it."
+            exit 1
+          fi
+          echo "Stable keystore SHA-256 matches the previously installed Yadet app."
           echo "KEYSTORE_CERT_SHA256=$KEYSTORE_CERT_SHA256" >> "$GITHUB_ENV"
 
       # Gemini requires Firebase AI Logic configuration for the original app package.
