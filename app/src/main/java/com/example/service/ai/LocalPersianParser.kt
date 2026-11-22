@@ -42,8 +42,14 @@ object LocalPersianParser {
 
 
     private fun splitAtSubsequentClockTimes(segment: String): List<String> {
-        val clockPattern = Regex("""ساعت\s*[0-9۰-۹]{1,2}(?![0-9۰-۹])""")
-        val matches = clockPattern.findAll(segment).toList()
+        // Recognize both explicit "ساعت ۱۲" and colloquial "۱۲ ظهر/عصر/صبح/شب".
+        // The second clock cue starts a new task even when "ساعت" is omitted.
+        val clockPattern = Regex("""(?:ساعت\s*)?[0-9۰-۹]{1,2}(?::[0-9۰-۹]{2})?(?:\s*(?:صبح|ظهر|عصر|شب))?""")
+        val matches = clockPattern.findAll(segment).filter { match ->
+            val token = match.value.trim()
+            token.any { it.isDigit() } && (token.contains("ساعت") || token.contains("صبح") ||
+                token.contains("ظهر") || token.contains("عصر") || token.contains("شب"))
+        }.toList()
         if (matches.size < 2) return listOf(segment)
 
         val boundaries = matches.drop(1).filter { match ->
