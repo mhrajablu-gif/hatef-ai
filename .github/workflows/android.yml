@@ -99,6 +99,25 @@ jobs:
           ls -lh app/build/outputs/apk/debug/
           test -f app/build/outputs/apk/debug/app-debug.apk
 
+      - name: Verify APK signing certificate
+        env:
+          EXPECTED_DEBUG_CERT_SHA256: "66:66:FB:95:74:B3:90:CF:2D:65:93:EF:81:6E:F4:5A:79:A6:04:FC:2F:BE:B7:13:1C:8C:3C:07:2B:34:48:F4"
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          APKSIGNER="$(find "$SDK_ROOT/build-tools" -type f -name apksigner 2>/dev/null | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::Android apksigner was not found; refusing to publish an APK without verifying its certificate."
+            exit 1
+          fi
+          ACTUAL_SHA256="$("$APKSIGNER" verify --print-certs "$APK" | awk -F': ' '/Signer #1 certificate SHA-256 digest:/ {print toupper($2); exit}' | tr -d ':[:space:]')"
+          EXPECTED_SHA256="$(printf '%s' "$EXPECTED_DEBUG_CERT_SHA256" | tr -d ':[:space:]' | tr '[:lower:]' '[:upper:]')"
+          if [ -z "$ACTUAL_SHA256" ] || [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::APK signing certificate mismatch. Expected SHA-256 $EXPECTED_DEBUG_CERT_SHA256; found ${ACTUAL_SHA256:-<unavailable>}. APK will not be uploaded because it cannot update the established installation."
+            exit 1
+          fi
+          echo "APK signing certificate matches the established installation."
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
