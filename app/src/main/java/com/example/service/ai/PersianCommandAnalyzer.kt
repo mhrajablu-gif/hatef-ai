@@ -81,7 +81,7 @@ object PersianCommandAnalyzer {
         // 5. Extract Date / Weekday. A weekday explicitly excluded from a recurrence
         // (for example, "هر روز به‌جز جمعه") is not a one-off requested date.
         val dateInput = normalizedEnglish.replace(
-            Regex("""(?:به\s*جز|بجز|غیر\s*از)\s*جمعه"""),
+            Regex("""(?:به[\s‌]*جز|بجز|غیر[\s‌]*از)[\s‌]*جمعه"""),
             " "
         )
         val dateExtraction = extractDate(dateInput, referenceTimeMillis, timeZone)
@@ -836,7 +836,7 @@ object PersianCommandAnalyzer {
 
         // Remove date, recurrence and weekday words so they never pollute the reminder title.
         t = t.replace(Regex("""(?:هر\s*روز|روزانه|هر\s*هفته|هفتگی|هر\s*ماه|ماهانه|هر\s*سال|سالانه|هر\s+جمعه|امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
-        t = t.replace(Regex("""(?:به\s*جز|بجز|غیر\s*از)\s*(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
+        t = t.replace(Regex("""(?:به[\s‌]*جز|بجز|غیر[\s‌]*از)[\s‌]*(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه[\s‌]*شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
         t = t.replace(Regex("""(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
         t = t.replace(Regex("""ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{1,2})?\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)?"""), " ")
         t = t.replace(Regex("""[\d۰-۹]{1,2}\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)"""), " ")
