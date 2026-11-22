@@ -78,8 +78,13 @@ object PersianCommandAnalyzer {
         val isDailyRecurrence = (clean.contains("هر روز") || clean.contains("روزانه")) &&
             !clean.contains("هر روز کاری") && !clean.contains("روزهای کاری")
 
-        // 5. Extract Date / Weekday
-        val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone)
+        // 5. Extract Date / Weekday. A weekday explicitly excluded from a recurrence
+        // (for example, "هر روز به‌جز جمعه") is not a one-off requested date.
+        val dateInput = normalizedEnglish.replace(
+            Regex("""(?:به[\s‌]*جز|بجز|غیر[\s‌]*از)[\s‌]*جمعه"""),
+            " "
+        )
+        val dateExtraction = extractDate(dateInput, referenceTimeMillis, timeZone)
 
         // 6. Detect Ambiguity in Hour (e.g. "ساعت ۶" without morning/evening)
         val isHourAmbiguous = timeExtraction.hasExplicitHour && !timeExtraction.isPeriodSpecified && timeExtraction.rawHour in 1..11
@@ -175,6 +180,10 @@ object PersianCommandAnalyzer {
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
                 if (timeInMillis <= referenceTimeMillis) add(Calendar.DAY_OF_YEAR, 1)
+                // "هر روز به‌جز جمعه" is a working-day recurrence in the Iranian calendar.
+                while (get(Calendar.DAY_OF_WEEK) == Calendar.FRIDAY) {
+                    add(Calendar.DAY_OF_YEAR, 1)
+                }
             }
             targetTimestamp = nextOccurrence.timeInMillis
             calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp!!, timeZone)
@@ -243,8 +252,13 @@ object PersianCommandAnalyzer {
             else -> 0
         }
 
+        val compactForRecurrence = normalizeText(clean).replace(" ", "").replace("‌", "")
+        val everyDayExceptFriday = compactForRecurrence.contains("هرروزبهجزجمعه") ||
+            compactForRecurrence.contains("هرروزبجزجمعه") ||
+            compactForRecurrence.contains("هرروزغیرازجمعه")
+
         val repeat = when {
-            clean.contains("هر روز کاری") || clean.contains("روزهای کاری") -> "WORKDAYS"
+            everyDayExceptFriday || clean.contains("هر روز کاری") || clean.contains("روزهای کاری") -> "WORKDAYS"
             clean.contains("هر روز") || clean.contains("روزانه") -> "DAILY"
             clean.contains("هر هفته") || clean.contains("هفتگی") ||
                 listOf("هر شنبه", "هر یکشنبه", "هر دوشنبه", "هر سه‌شنبه", "هر چهارشنبه", "هر پنجشنبه", "هر جمعه").any { clean.contains(it) } -> "WEEKLY"
@@ -822,6 +836,7 @@ object PersianCommandAnalyzer {
 
         // Remove date, recurrence and weekday words so they never pollute the reminder title.
         t = t.replace(Regex("""(?:هر\s*روز|روزانه|هر\s*هفته|هفتگی|هر\s*ماه|ماهانه|هر\s*سال|سالانه|هر\s+جمعه|امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
+        t = t.replace(Regex("""(?:به[\s‌]*جز|بجز|غیر[\s‌]*از)[\s‌]*(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه[\s‌]*شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
         t = t.replace(Regex("""(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
         t = t.replace(Regex("""ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{1,2})?\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)?"""), " ")
         t = t.replace(Regex("""[\d۰-۹]{1,2}\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)"""), " ")

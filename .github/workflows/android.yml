@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - fix/yadet-1.19.0-multi-reminder-clarification
+      - fix/yadet-1.19.6-recurrence-and-multi-time
 
 permissions:
   contents: read
@@ -49,7 +50,12 @@ jobs:
             echo "::error::Could not read SHA-256 fingerprint from the stable keystore."
             exit 1
           fi
-          echo "Stable keystore SHA-256: $KEYSTORE_CERT_SHA256"
+          EXPECTED_INSTALL_CERT_SHA256="6666fb9574b390cf2d6593ef816ef45a79a604fc2fbeb7131c8c3c072b3448f4"
+          if [ "$KEYSTORE_CERT_SHA256" != "$EXPECTED_INSTALL_CERT_SHA256" ]; then
+            echo "::error::Signing certificate does not match the previously installed Yadet app. Refusing to build an APK that cannot update it."
+            exit 1
+          fi
+          echo "Stable keystore SHA-256 matches the previously installed Yadet app."
           echo "KEYSTORE_CERT_SHA256=$KEYSTORE_CERT_SHA256" >> "$GITHUB_ENV"
 
       # Gemini requires Firebase AI Logic configuration for the original app package.
@@ -135,8 +141,8 @@ jobs:
           VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionCode='([^']+)'.*/\\1/p")"
           VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionName='([^']+)'.*/\\1/p")"
           test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq"
-          test "$VERSION_CODE" = "34"
-          test "$VERSION_NAME" = "1.19.5"
+          test "$VERSION_CODE" = "35"
+          test "$VERSION_NAME" = "1.19.6"
 
           VERIFY_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
           printf '%s\n' "$VERIFY_OUTPUT"
@@ -155,9 +161,9 @@ jobs:
         if: env.FIREBASE_CONFIG_READY == 'true'
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.19.5.apk
-          test -s release/yadet-v1.19.5.apk
-          sha256sum release/yadet-v1.19.5.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.19.6.apk
+          test -s release/yadet-v1.19.6.apk
+          sha256sum release/yadet-v1.19.6.apk
 
       - name: Upload unit test reports
         if: always()
@@ -172,8 +178,8 @@ jobs:
         if: env.FIREBASE_CONFIG_READY == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: yadet-v1.19.5
-          path: release/yadet-v1.19.5.apk
+          name: yadet-v1.19.6
+          path: release/yadet-v1.19.6.apk
           retention-days: 14
 
 # Rebuild after stable signing-key restoration and Android version bump.

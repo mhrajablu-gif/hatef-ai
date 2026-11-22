@@ -421,4 +421,44 @@ class PersianCommandAnalyzerTest {
         assertEquals("WORKDAYS", workdays.repeatType)
     }
 
+
+    @Test
+    fun everyDayExceptFridayIsParsedAsWorkdaysAndSchedulesNextAllowedDay() {
+        val fridayMorning = Calendar.getInstance(tehranTimeZone).apply {
+            set(Calendar.YEAR, 2026)
+            set(Calendar.MONTH, Calendar.OCTOBER)
+            set(Calendar.DAY_OF_MONTH, 30) // Friday
+            set(Calendar.HOUR_OF_DAY, 10)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val result = PersianCommandAnalyzer.analyze(
+            "هر روز به‌جز جمعه ساعت ۱۸ آب بخورم",
+            fridayMorning,
+            tehranTimeZone
+        )
+
+        assertEquals("WORKDAYS", result.repeatType)
+        assertEquals("شنبه", result.calculatedWeekday)
+        assertEquals(18, result.hour)
+        assertNotNull(result.targetTimestamp)
+        assertTrue(result.title.contains("آب"))
+        assertFalse(result.title.contains("به‌جز"))
+        assertFalse(result.title.contains("جمعه"))
+    }
+
+    @Test
+    fun everyDayExceptFridayIsRecognizedFromCommonUnspacedSpelling() {
+        val result = PersianCommandAnalyzer.analyze(
+            "هر روز به جز جمعه ساعت ۸ صبح دارو بخورم",
+            baseTime,
+            tehranTimeZone
+        )
+        assertEquals("WORKDAYS", result.repeatType)
+        assertNotNull(result.targetTimestamp)
+        assertFalse(result.needsUserClarification)
+    }
+
 }
