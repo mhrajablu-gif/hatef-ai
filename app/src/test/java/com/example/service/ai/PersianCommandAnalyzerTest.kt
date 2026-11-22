@@ -370,4 +370,34 @@ class PersianCommandAnalyzerTest {
         assertEquals(1, tasks.size)
     }
 
+
+    @Test
+    fun dailyExceptFridayRecognizesCompactBejzoSpelling() {
+        val result = PersianCommandAnalyzer.analyze(
+            "هر روز بجز جمعه ساعت ۷ صبح ورزش رو یادم بنداز",
+            baseTime,
+            tehranTimeZone
+        )
+
+        assertEquals("CUSTOM", result.repeatType)
+        assertEquals(setOf("SAT", "SUN", "MON", "TUE", "WED", "THU"), result.recurrenceDaysOfWeek?.split(",")?.toSet())
+        assertFalse(result.title.contains("بجز"))
+        assertFalse(result.title.contains("جمعه"))
+    }
+
+    @Test
+    fun localParserSplitsMorningAndNoonTimesWithoutRepeatedClockWord() {
+        val tasks = LocalPersianParser.parse(
+            "فردا ساعت ۷ صبح برم نون بخرم و ۱۲ ظهر آب بیارم",
+            baseTime
+        )
+
+        assertEquals(2, tasks.size)
+        assertEquals("۰۷:۰۰", tasks[0].timeText)
+        assertEquals("۱۲:۰۰", tasks[1].timeText)
+        assertEquals(tasks[0].jalaliDateText, tasks[1].jalaliDateText)
+        assertTrue(tasks[0].title.contains("نون") || tasks[0].title.contains("نان"))
+        assertTrue(tasks[1].title.contains("آب"))
+    }
+
 }
