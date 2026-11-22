@@ -22,4 +22,15 @@ class GeneralConversationalAiServiceTest {
 
         assertTrue(reply.contains("۲۵ دقیقه"))
     }
+
+    @Test
+    fun spouseBirthdayPlanningAsksForMissingDateInsteadOfGenericOfflineFailure() {
+        val service = GeneralConversationalAiService()
+        val reply = service.getOfflineKnowledgeReply("سال آینده همین موقع تولد خانمم")
+
+        assertTrue(reply.contains("تولد همسرتان"))
+        assertTrue(reply.contains("روز و ماه"))
+        assertFalse(reply.contains("ارتباط با هوش مصنوعی هم برقرار نشد"))
+    }
+
 }
