@@ -175,6 +175,10 @@ object PersianCommandAnalyzer {
                 set(Calendar.SECOND, 0)
                 set(Calendar.MILLISECOND, 0)
                 if (timeInMillis <= referenceTimeMillis) add(Calendar.DAY_OF_YEAR, 1)
+                // "هر روز به‌جز جمعه" is a working-day recurrence in the Iranian calendar.
+                while (get(Calendar.DAY_OF_WEEK) == Calendar.FRIDAY) {
+                    add(Calendar.DAY_OF_YEAR, 1)
+                }
             }
             targetTimestamp = nextOccurrence.timeInMillis
             calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp!!, timeZone)
@@ -243,8 +247,13 @@ object PersianCommandAnalyzer {
             else -> 0
         }
 
+        val compactForRecurrence = normalizeText(clean).replace(" ", "").replace("‌", "")
+        val everyDayExceptFriday = compactForRecurrence.contains("هرروزبهجزجمعه") ||
+            compactForRecurrence.contains("هرروزبجزجمعه") ||
+            compactForRecurrence.contains("هرروزغیرازجمعه")
+
         val repeat = when {
-            clean.contains("هر روز کاری") || clean.contains("روزهای کاری") -> "WORKDAYS"
+            everyDayExceptFriday || clean.contains("هر روز کاری") || clean.contains("روزهای کاری") -> "WORKDAYS"
             clean.contains("هر روز") || clean.contains("روزانه") -> "DAILY"
             clean.contains("هر هفته") || clean.contains("هفتگی") ||
                 listOf("هر شنبه", "هر یکشنبه", "هر دوشنبه", "هر سه‌شنبه", "هر چهارشنبه", "هر پنجشنبه", "هر جمعه").any { clean.contains(it) } -> "WEEKLY"
