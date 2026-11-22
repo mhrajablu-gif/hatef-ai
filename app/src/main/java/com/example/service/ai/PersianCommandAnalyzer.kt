@@ -78,8 +78,13 @@ object PersianCommandAnalyzer {
         val isDailyRecurrence = (clean.contains("هر روز") || clean.contains("روزانه")) &&
             !clean.contains("هر روز کاری") && !clean.contains("روزهای کاری")
 
-        // 5. Extract Date / Weekday
-        val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone)
+        // 5. Extract Date / Weekday. A weekday explicitly excluded from a recurrence
+        // (for example, "هر روز به‌جز جمعه") is not a one-off requested date.
+        val dateInput = normalizedEnglish.replace(
+            Regex("""(?:به\s*جز|بجز|غیر\s*از)\s*جمعه"""),
+            " "
+        )
+        val dateExtraction = extractDate(dateInput, referenceTimeMillis, timeZone)
 
         // 6. Detect Ambiguity in Hour (e.g. "ساعت ۶" without morning/evening)
         val isHourAmbiguous = timeExtraction.hasExplicitHour && !timeExtraction.isPeriodSpecified && timeExtraction.rawHour in 1..11
