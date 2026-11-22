@@ -156,4 +156,19 @@ class LocalPersianParserTest {
     }
 
 
+
+    @Test
+    fun parsesEveryDayExceptFridayAsWorkdayRecurrence() {
+        val tasks = LocalPersianParser.parse(
+            "هر روز به‌جز جمعه ساعت ۸ صبح دارو بخورم",
+            referenceTimeMillis = 1_793_016_000_000L
+        )
+
+        assertEquals(1, tasks.size)
+        assertEquals("WORKDAYS", tasks.single().repeatType)
+        assertTrue(tasks.single().hasExplicitTime)
+        assertTrue(tasks.single().hasExplicitTitle)
+        assertTrue(tasks.single().title.contains("دارو"))
+    }
+
 }
