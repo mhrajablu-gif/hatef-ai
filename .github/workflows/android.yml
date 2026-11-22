@@ -1,24 +1,18 @@
-name: Build Android APK
+name: Build Yadet Safe Test APK
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
   push:
     branches:
-      - main
-      - fix/yadet-1.19.0-multi-reminder-clarification
-      - fix/yadet-1.19.6-recurrence-and-multi-time
+      - test/yadet-1.19.7-safe-offline
 
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Test and Build Side-by-Side APK
     runs-on: ubuntu-24.04
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -26,74 +20,27 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v6
         with:
-          distribution: 'temurin'
+          distribution: temurin
           java-version: '21'
-          cache: 'gradle'
+          cache: gradle
 
-      - name: Restore Stable Debug Keystore
+      - name: Restore stable debug signing key
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
-            echo "::error::Stable signing key is missing. Configure the existing DEBUG_KEYSTORE_BASE64 secret; refusing to generate a temporary key that would break app updates."
+            echo "::error::Stable signing key secret is missing."
             exit 1
           fi
           printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
-          echo "Restored stable debug keystore from repository secret."
           test -s debug.keystore
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E 'SHA256:|SHA-256:'
 
-      - name: Print and retain stable signing certificate fingerprint
+      - name: Prepare local secrets configuration
         run: |
-          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | tee /tmp/yadet-signing-certificate.txt
-          KEYSTORE_CERT_SHA256="$(sed -nE 's/^[[:space:]]*SHA256:[[:space:]]*//p' /tmp/yadet-signing-certificate.txt | head -n 1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          if [ -z "$KEYSTORE_CERT_SHA256" ]; then
-            echo "::error::Could not read SHA-256 fingerprint from the stable keystore."
-            exit 1
-          fi
-          EXPECTED_INSTALL_CERT_SHA256="6666fb9574b390cf2d6593ef816ef45a79a604fc2fbeb7131c8c3c072b3448f4"
-          if [ "$KEYSTORE_CERT_SHA256" != "$EXPECTED_INSTALL_CERT_SHA256" ]; then
-            echo "::error::Signing certificate does not match the previously installed Yadet app. Refusing to build an APK that cannot update it."
-            exit 1
-          fi
-          echo "Stable keystore SHA-256 matches the previously installed Yadet app."
-          echo "KEYSTORE_CERT_SHA256=$KEYSTORE_CERT_SHA256" >> "$GITHUB_ENV"
-
-      # Gemini requires Firebase AI Logic configuration for the original app package.
-      # Add a Firebase Android app for com.aistudio.hatefassistant.pxkrmq and store
-      # its google-services.json contents in the GOOGLE_SERVICES_JSON repository secret.
-      - name: Restore Firebase configuration for original app
-        env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-        run: |
-          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "::warning::Firebase config for the original application package is not set. Tests will run, but APK creation is intentionally skipped."
-            echo "FIREBASE_CONFIG_READY=false" >> "$GITHUB_ENV"
-          else
-            mkdir -p app
-            printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
-            python3 - <<'PY'
-          import json, sys
-          with open("app/google-services.json", encoding="utf-8") as f:
-              data = json.load(f)
-          packages = [
-              c.get("client_info", {}).get("android_client_info", {}).get("package_name")
-              for c in data.get("client", [])
-          ]
-          expected = "com.aistudio.hatefassistant.pxkrmq"
-          if expected not in packages:
-              print("::error::google-services.json has no client for the original application ID.")
-              sys.exit(1)
-          print("Firebase configuration matches the original application ID.")
-          PY
-            echo "FIREBASE_CONFIG_READY=true" >> "$GITHUB_ENV"
-          fi
-
-      - name: Prepare Secrets Configuration
-        run: |
-          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
-            cp .env.example .env
-            echo "Created .env from .env.example"
-          fi
+          if [ ! -f ".env" ] && [ -f ".env.example" ]; then cp .env.example .env; fi
+          # This side-by-side test build intentionally has no Firebase app registration.
+          # Local reminder features remain testable; Gemini requests fall back to local parsing.
 
       - name: Make Gradle Wrapper Executable
         run: chmod +x ./gradlew
@@ -104,82 +51,42 @@ jobs:
       - name: Run Android lint
         run: ./gradlew :app:lintDebug --stacktrace --no-daemon
 
-      - name: Upload Android lint report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: Yadet-lint-reports
-          path: |
-            app/build/reports/lint-results-debug.html
-            app/build/intermediates/lint_intermediate_text_report/debug/lintReportDebug/lint-results-debug.txt
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Build APK
-        if: env.FIREBASE_CONFIG_READY == 'true'
+      - name: Build safe test APK
         run: ./gradlew :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Verify APK Output
-        if: env.FIREBASE_CONFIG_READY == 'true'
-        run: |
-          ls -lh app/build/outputs/apk/debug/
-          test -f app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Verify APK package, version, and stable signing certificate
-        if: env.FIREBASE_CONFIG_READY == 'true'
+      - name: Verify APK package, version, and signature
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
           BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-          APKSIGNER="$BUILD_TOOLS/apksigner"
-          AAPT="$BUILD_TOOLS/aapt"
-          test -x "$APKSIGNER"
-          test -x "$AAPT"
-
-          BADGING="$("$AAPT" dump badging "$APK")"
+          BADGING="$("$BUILD_TOOLS/aapt" dump badging "$APK")"
           printf '%s\n' "$BADGING" | head -n 1
-          PACKAGE_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package: name='([^']+)'.*/\\1/p")"
-          VERSION_CODE="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionCode='([^']+)'.*/\\1/p")"
-          VERSION_NAME="$(printf '%s\n' "$BADGING" | sed -nE "1s/^package:.*versionName='([^']+)'.*/\\1/p")"
-          test "$PACKAGE_NAME" = "com.aistudio.hatefassistant.pxkrmq"
-          test "$VERSION_CODE" = "35"
-          test "$VERSION_NAME" = "1.19.6"
+          echo "$BADGING" | grep -F "name='com.aistudio.hatefassistant.pxkrmq.safe'"
+          echo "$BADGING" | grep -F "versionCode='36'"
+          echo "$BADGING" | grep -F "versionName='1.19.7-test'"
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
 
-          VERIFY_OUTPUT="$("$APKSIGNER" verify --verbose --print-certs "$APK")"
-          printf '%s\n' "$VERIFY_OUTPUT"
-          APK_CERT_SHA256="$(printf '%s\n' "$VERIFY_OUTPUT" | awk '/V2 Signer: certificate SHA-256 digest:/ {print tolower($NF); exit}' | tr -d ':')"
-          if [ -z "$APK_CERT_SHA256" ] || [ -z "$KEYSTORE_CERT_SHA256" ]; then
-            echo "::error::Could not read both APK and keystore signing fingerprints."
-            exit 1
-          fi
-          if [ "$APK_CERT_SHA256" != "$KEYSTORE_CERT_SHA256" ]; then
-            echo "::error::APK signing certificate does not match the stable keystore. Refusing to upload an un-updatable APK."
-            exit 1
-          fi
-          echo "APK package/version and signing certificate match the established update baseline."
-
-      - name: Prepare versioned APK filename
-        if: env.FIREBASE_CONFIG_READY == 'true'
+      - name: Prepare versioned APK
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-v1.19.6.apk
-          test -s release/yadet-v1.19.6.apk
-          sha256sum release/yadet-v1.19.6.apk
+          cp app/build/outputs/apk/debug/app-debug.apk release/yadet-1.19.7-test-safe.apk
+          sha256sum release/yadet-1.19.7-test-safe.apk
+          ls -lh release/yadet-1.19.7-test-safe.apk
 
-      - name: Upload unit test reports
+      - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: Yadet-unit-test-reports
-          path: app/build/reports/tests/testDebugUnitTest/
+          name: yadet-test-reports-1.19.7
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Upload APK
-        if: env.FIREBASE_CONFIG_READY == 'true'
+      - name: Upload safe test APK
         uses: actions/upload-artifact@v7
         with:
-          name: yadet-v1.19.6
-          path: release/yadet-v1.19.6.apk
+          name: yadet-1.19.7-test-safe
+          path: release/yadet-1.19.7-test-safe.apk
           retention-days: 14
-
-# Rebuild after stable signing-key restoration and Android version bump.
