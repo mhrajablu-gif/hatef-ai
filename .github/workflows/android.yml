@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - fix/yadet-1.19.0-multi-reminder-clarification
+      - fix/yadet-1.19.6-recurrence-and-multi-time
 
 permissions:
   contents: read
