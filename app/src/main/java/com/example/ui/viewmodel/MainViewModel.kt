@@ -277,7 +277,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
             // The local parser already supports multiple independently timed segments.
             // Use it before the single-draft conversation engine when a message clearly contains a batch.
-            val schedulingCueCount = Regex("""(?:ساعت\s*[\d۰-۹]{1,2}|فردا|پس\s*فردا|پسفردا|امروز|هر\s+روز|هر\s+هفته|یک\s+ربع|یه\s+ربع|نیم\s+ساعت)""")
+            // Count both "ساعت ۷" and colloquial clock forms such as "۷ صبح" / "۱۲ ظهر".
+            // A single date shared by two times must still enter the batch parser.
+            val schedulingCueCount = Regex("""(?:ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{2})?|[\d۰-۹]{1,2}(?::[\d۰-۹]{2})?\s*(?:صبح|ظهر|عصر|شب)|فردا|پس\s*فردا|پسفردا|امروز|هر\s+روز|هر\s+هفته|یک\s+ربع|یه\s+ربع|نیم\s+ساعت)""")
                 .findAll(clean).count()
             if (schedulingCueCount >= 2) {
                 val tasks = aiParser.parseCommand(clean)

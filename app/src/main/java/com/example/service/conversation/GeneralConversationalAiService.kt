@@ -175,6 +175,10 @@ class GeneralConversationalAiService {
         val lower = input.lowercase().trim()
 
         return when {
+            // Birthday planning: ask for the missing date instead of returning the generic offline error.
+            (lower.contains("تولد") && (lower.contains("خانمم") || lower.contains("همسرم") || lower.contains("خانومم"))) ->
+                "چه خوب! منظورتان این است که برای تولد همسرتان در سال آینده برنامه‌ریزی یا یادآور تنظیم کنیم؟ اگر بله، تاریخ تولدش (روز و ماه) را بگویید تا درست راهنمایی‌تان کنم."
+
             // Science & Physics
             lower.contains("آسمان آبی") || (lower.contains("اسمان") && lower.contains("ابی")) ->
                 "آبی بودن آسمان به دلیل پدیده «پراکندگی ریلی» (Rayleigh Scattering) است. نور خورشید از تمام رنگ‌های طیف مرئی تشکیل شده، اما طول موج نور آبی کوتاه‌تر از نورهای دیگر است. وقتی نور خورشید به مولکول‌های گاز در جو زمین برخورد می‌کند، نور با طول موج کوتاه‌تر (آبی و بنفش) بسیار بیشتر از سایر رنگ‌ها در تمام جهات پراکنده می‌شود و به همین دلیل آسمان را آبی می‌بینیم."

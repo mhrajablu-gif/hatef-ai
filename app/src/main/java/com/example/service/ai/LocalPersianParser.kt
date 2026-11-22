@@ -33,7 +33,7 @@ object LocalPersianParser {
             val task = if (effectiveSegment == segment) initial else parseSingleCommand(effectiveSegment, referenceTimeMillis)
             tasks.add(task)
             val dateSearchText = PersianCommandAnalyzer.normalizeText(segment)
-                .replace(Regex("""(?:به\s*جز|به‌جز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""), " ")
+                .replace(Regex("""(?:به\s*جز|به‌جز|بجز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""), " ")
             val dateMatch = dateContextPattern.find(dateSearchText)
             if (dateMatch != null) inheritedDateContext = dateMatch.value
         }
@@ -42,8 +42,14 @@ object LocalPersianParser {
 
 
     private fun splitAtSubsequentClockTimes(segment: String): List<String> {
-        val clockPattern = Regex("""ساعت\s*[0-9۰-۹]{1,2}(?![0-9۰-۹])""")
-        val matches = clockPattern.findAll(segment).toList()
+        // Recognize both explicit "ساعت ۱۲" and colloquial "۱۲ ظهر/عصر/صبح/شب".
+        // The second clock cue starts a new task even when "ساعت" is omitted.
+        val clockPattern = Regex("""(?:ساعت\s*)?[0-9۰-۹]{1,2}(?::[0-9۰-۹]{2})?(?:\s*(?:صبح|ظهر|عصر|شب))?""")
+        val matches = clockPattern.findAll(segment).filter { match ->
+            val token = match.value.trim()
+            token.any { it.isDigit() } && (token.contains("ساعت") || token.contains("صبح") ||
+                token.contains("ظهر") || token.contains("عصر") || token.contains("شب"))
+        }.toList()
         if (matches.size < 2) return listOf(segment)
 
         val boundaries = matches.drop(1).filter { match ->
@@ -66,7 +72,7 @@ object LocalPersianParser {
     private fun hasExplicitDatePhrase(input: String): Boolean {
         val normalized = PersianCommandAnalyzer.normalizeText(input)
         val withoutExcludedDays = normalized.replace(
-            Regex("""(?:به\s*جز|به‌جز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""),
+            Regex("""(?:به\s*جز|به‌جز|بجز|غیر\s*از)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?"""),
             " "
         )
         val datePattern = Regex("""(?:امروز|امشب|فردا|پس[\s‌]?فردا|پس\s+اون\s+فردا|هفته\s+(?:بعد|آینده)|چهارشنبه|پنجشنبه|پنج‌شنبه|سه‌شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه|[\d۰-۹]{1,2}\s*(?:فروردین|اردیبهشت|خرداد|تیر|مرداد|شهریور|مهر|آبان|آذر|دی|بهمن|اسفند))""")
