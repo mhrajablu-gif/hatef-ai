@@ -117,6 +117,7 @@ object LocalPersianParser {
             category = analysis.category,
             priority = analysis.priority,
             repeatType = analysis.repeatType,
+            recurrenceDaysOfWeek = null,
             advanceAlertMinutes = 0,
             hasExplicitTime = hasExplicitTime,
             hasExplicitDate = hasExplicitDate,
