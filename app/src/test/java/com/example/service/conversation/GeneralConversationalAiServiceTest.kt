@@ -22,4 +22,14 @@ class GeneralConversationalAiServiceTest {
 
         assertTrue(reply.contains("۲۵ دقیقه"))
     }
+    @Test
+    fun spouseBirthdayPlanningAsksForDateWithoutCreatingReminderOrReturningGenericOfflineError() {
+        val service = GeneralConversationalAiService()
+        val reply = service.getOfflineKnowledgeReply("سال آینده همین موقع تولد خانمم")
+
+        assertTrue(reply.contains("روز و ماه تولد"))
+        assertTrue(reply.contains("هیچ یادآوری ثبت نکردم"))
+        assertFalse(reply.contains("ارتباط با هوش مصنوعی هم برقرار نشد"))
+    }
+
 }
