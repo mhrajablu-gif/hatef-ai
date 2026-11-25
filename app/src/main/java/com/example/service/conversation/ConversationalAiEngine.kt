@@ -1434,32 +1434,75 @@ class ConversationalAiEngine(
         if (isConsultationOrAdviceQuestion(input)) return null
 
         val lower = input.lowercase().trim()
-        val isRoutineWord = lower.contains("معمولاً") || lower.contains("معمولا") || lower.contains("عادت دارم") || lower.contains("عادتمه") || lower.contains("برنامه هر روزمه")
-        val isWakeUp = lower.contains("بیدار") || lower.contains("پامیشم") || lower.contains("پا میشم") || lower.contains("بلند میشم")
-        val isSleep = lower.contains("می‌خوابم") || lower.contains("میخوابم") || lower.contains("خوابم")
+        val isRoutineWord = listOf(
+            "معمولاً", "معمولا", "عادت دارم", "عادتمه", "برنامه هر روزمه",
+            "هر روز", "روزانه", "هر شب", "هر صبح", "روال من", "روتین من"
+        ).any { lower.contains(it) }
+        val isWakeUp = lower.contains("بیدار میشم") || lower.contains("بیدار می‌شوم") ||
+            lower.contains("بیدار شوم") || lower.contains("پامیشم") ||
+            lower.contains("پا میشم") || lower.contains("بلند میشم") ||
+            lower.contains("بلند می‌شوم") || lower.contains("بیدار")
+        val isSleep = lower.contains("می‌خوابم") || lower.contains("میخوابم") ||
+            lower.contains("به خواب می‌روم") || lower.contains("به خواب میرم")
 
-        // User says e.g. "من معمولاً ساعت ۸ صبح بیدار میشم"
-        if ((isRoutineWord && (isWakeUp || isSleep)) || (isWakeUp && !lower.contains("یادم بنداز") && !lower.contains("تنظیم کن") && !lower.contains("زنگ بذار"))) {
-            val hour = extractNumber(lower) ?: 8
-            val formattedTime = PersianDateEngine.formatPersianTime(hour, 0)
-            val key = if (isSleep) "ساعت_خواب" else "ساعت_بیداری"
-            val toolRes = toolRegistry?.saveUserMemoryPreference(key, formattedTime, if (isSleep) "ساعت معمول خواب" else "ساعت معمول بیداری")
-            val label = if (isSleep) "خوابیدن" else "بیداری"
-            val reply = "ساعت $label شما ($formattedTime) در حافظه دستیار ثبت شد. از این پس در زمان‌بندی‌ها، پیشنهاد ساعات ورزش و قرارهای روزانه‌تان به این موضوع توجه خواهم کرد."
+        if (!isWakeUp && !isSleep) return null
+
+        // Explicit reminder commands must continue to the reminder-intent handler.
+        val hasExplicitReminderCommand = listOf(
+            "یادم بنداز", "یادم بیار", "یادآوری کن", "یادآور بذار",
+            "یادآور بگذار", "آلارم بذار", "زنگ بذار", "زنگ بگذار",
+            "بیدارم کن", "منو بیدار کن", "من رو بیدار کن", "تنظیم کن"
+        ).any { lower.contains(it) }
+        if (hasExplicitReminderCommand) return null
+
+        // A one-off waking/sleeping statement is not automatically a saved habit.
+        if (!isRoutineWord) {
             return ConversationalResponse(
-                replyText = reply,
+                replyText = "متوجه شدم. این جمله را به‌عنوان عادت دائمی ذخیره نکردم و هیچ یادآوری‌ای هم ثبت نکردم. اگر منظورتان تنظیم زنگ برای همین مورد است، ساعت را مشخص کنید.",
+                newState = state.copy(
+                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                ),
+                suggestedReplies = listOf("فقط خواستم اطلاع بدهم", "برای فردا ساعت ۷ زنگ بگذار")
+            )
+        }
+
+        // Never invent 08:00 when a routine declaration has no usable hour.
+        val hour = extractNumber(lower)
+        if (hour == null || hour !in 0..23) {
+            val label = if (isSleep) "خوابیدن" else "بیدار شدن"
+            return ConversationalResponse(
+                replyText = "متوجه شدم این بخشی از روال معمول شماست. اگر می‌خواهید ساعت $label را به خاطر بسپارم، ساعت دقیق را هم بگویید؛ تا آن زمان چیزی در حافظه ذخیره نکردم.",
                 newState = state.copy(
                     activeIntent = ConversationIntent.USER_ROUTINE_DECLARATION,
                     awaitingField = AwaitingField.NONE,
                     slotStatus = SlotFillingStatus.IDLE
                 ),
-                executedResult = toolRes,
-                suggestedReplies = listOf("به نظرت چه ساعتی ورزش کنم؟", "یادآور جدید", "برنامه فردا چیه؟")
+                suggestedReplies = listOf("ساعت ۷ صبح", "ساعت ۸ صبح", "ساعت ۱۱ شب")
             )
         }
-        return null
-    }
 
+        val formattedTime = PersianDateEngine.formatPersianTime(hour, 0)
+        val key = if (isSleep) "ساعت_خواب" else "ساعت_بیداری"
+        val toolRes = toolRegistry?.saveUserMemoryPreference(
+            key,
+            formattedTime,
+            if (isSleep) "ساعت معمول خواب" else "ساعت معمول بیداری"
+        )
+        val label = if (isSleep) "خوابیدن" else "بیداری"
+        val reply = "ساعت $label شما ($formattedTime) در حافظه دستیار ثبت شد. از این پس در زمان‌بندی‌ها، پیشنهاد ساعات ورزش و قرارهای روزانه‌تان به این موضوع توجه خواهم کرد."
+        return ConversationalResponse(
+            replyText = reply,
+            newState = state.copy(
+                activeIntent = ConversationIntent.USER_ROUTINE_DECLARATION,
+                awaitingField = AwaitingField.NONE,
+                slotStatus = SlotFillingStatus.IDLE
+            ),
+            executedResult = toolRes,
+            suggestedReplies = listOf("به نظرت چه ساعتی ورزش کنم؟", "یادآور جدید", "برنامه فردا چیه؟")
+        )
+    }
     private fun isConsultationOrAdviceQuestion(input: String): Boolean {
         val lower = input.lowercase().trim()
         if (lower.startsWith("سلام") || lower.startsWith("درود") || lower.contains("حالت چطوره") || lower.contains("چطوری") || lower.contains("خوبی")) return false
