@@ -317,6 +317,17 @@ class Phase1ConversationalEngineTest {
     }
 
     @Test
+    fun wakeUpReminderWithRememberMePhraseStillUsesReminderFlow() = runBlocking {
+        val response = engine.processTurn(
+            userInput = "یادم نره فردا ساعت ۷ صبح بیدار شم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertNotNull(response.newState.draftTask)
+    }
+
+    @Test
     fun test20_ExplicitCallReminderCreated() = runBlocking {
         val input = "یادم بنداز فردا ساعت ۸ با علی تماس بگیرم."
         val response = engine.processTurn(
