@@ -1472,9 +1472,17 @@ class ConversationalAiEngine(
             )
         }
 
-        // Never invent 08:00 when a routine declaration has no usable hour.
+        // A duration such as "8 hours of sleep" is not a clock time.
+        // Require an explicit clock marker before saving a routine time.
         val hour = extractNumber(lower)
-        if (hour == null || hour !in 0..23) {
+        val isSleepDuration = Regex(
+            """(?:[0-9۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده)\\s*ساعت\\s*(?:می‌خوابم|میخوابم|می خوابم|خوابم)"""
+        ).containsMatchIn(lower)
+        val hasClockMarker = !isSleepDuration && (
+            lower.contains("ساعت") ||
+                listOf("صبح", "ظهر", "عصر", "شب", "نیمه شب").any { lower.contains(it) }
+            )
+        if (hour == null || hour !in 0..23 || !hasClockMarker) {
             val label = if (isSleep) "خوابیدن" else "بیدار شدن"
             return ConversationalResponse(
                 replyText = "متوجه شدم این بخشی از روال معمول شماست. اگر می‌خواهید ساعت $label را به خاطر بسپارم، ساعت دقیق را هم بگویید؛ تا آن زمان چیزی در حافظه ذخیره نکردم.",
