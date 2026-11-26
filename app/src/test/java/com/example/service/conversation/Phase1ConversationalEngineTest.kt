@@ -305,6 +305,19 @@ class Phase1ConversationalEngineTest {
     }
 
     @Test
+    fun sleepDurationIsNotMisreadAsClockTimeForRoutine() = runBlocking {
+        val response = engine.processTurn(
+            userInput = "من معمولاً ۸ ساعت می‌خوابم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(ConversationIntent.USER_ROUTINE_DECLARATION, response.newState.activeIntent)
+        assertTrue(response.replyText.contains("ساعت دقیق"))
+        assertTrue(response.replyText.contains("چیزی در حافظه ذخیره نکردم"))
+        assertFalse(response.replyText.contains("در حافظه دستیار ثبت شد"))
+    }
+
+    @Test
     fun test19_WorkoutAtMidnightStatementDoesNotCreateReminder() = runBlocking {
         val input = "ساعت ۱۲ شب ورزش کردن مناسب نیست."
         val response = engine.processTurn(
