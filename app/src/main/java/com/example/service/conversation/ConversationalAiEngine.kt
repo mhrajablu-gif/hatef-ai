@@ -1476,7 +1476,7 @@ class ConversationalAiEngine(
         // Require an explicit clock marker before saving a routine time.
         val hour = extractNumber(lower)
         val isSleepDuration = Regex(
-            """(?:[0-9۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده)\\s*ساعت\\s*(?:می‌خوابم|میخوابم|می خوابم|خوابم)"""
+            """(?:[0-9۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده)\s*ساعت\s*(?:می‌خوابم|میخوابم|می خوابم|خوابم)"""
         ).containsMatchIn(lower)
         val hasClockMarker = !isSleepDuration && (
             lower.contains("ساعت") ||
