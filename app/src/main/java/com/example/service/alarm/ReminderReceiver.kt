@@ -37,6 +37,10 @@ class ReminderReceiver : BroadcastReceiver() {
                 val time = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_TIME) ?: ""
                 val soundUriStr = intent.getStringExtra(AlarmScheduler.EXTRA_REMINDER_SOUND_URI)
                 showNotification(context, reminderId, title, desc, time, soundUriStr)
+                val isAdvance = intent.getBooleanExtra(AlarmScheduler.EXTRA_IS_ADVANCE, false)
+                if (!isAdvance && reminderId > 0L) {
+                    scheduleNextRecurringOccurrence(context, reminderId)
+                }
             }
 
             AlarmScheduler.ACTION_COMPLETE_REMINDER -> {
@@ -47,7 +51,11 @@ class ReminderReceiver : BroadcastReceiver() {
                 CoroutineScope(Dispatchers.IO).launch {
                     try {
                         val db = AppDatabase.getDatabase(context)
-                        db.reminderDao().setCompleted(reminderId, true, System.currentTimeMillis())
+                        val reminder = db.reminderDao().getReminderById(reminderId)
+                        // Recurring reminders already point to their next occurrence.
+                        if (reminder == null || reminder.repeatType == "NONE") {
+                            db.reminderDao().setCompleted(reminderId, true, System.currentTimeMillis())
+                        }
                     } finally {
                         pendingResult.finish()
                     }
@@ -79,6 +87,27 @@ class ReminderReceiver : BroadcastReceiver() {
                         pendingResult.finish()
                     }
                 }
+            }
+        }
+    }
+
+    private fun scheduleNextRecurringOccurrence(context: Context, reminderId: Long) {
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val db = AppDatabase.getDatabase(context)
+                val reminder = db.reminderDao().getReminderById(reminderId) ?: return@launch
+                if (reminder.repeatType == "NONE") return@launch
+
+                val next = ReminderRecurrence.next(reminder)
+                if (next != null) {
+                    db.reminderDao().update(next)
+                    AlarmScheduler.scheduleReminder(context, next)
+                } else {
+                    db.reminderDao().setCompleted(reminderId, true, System.currentTimeMillis())
+                }
+            } finally {
+                pendingResult.finish()
             }
         }
     }

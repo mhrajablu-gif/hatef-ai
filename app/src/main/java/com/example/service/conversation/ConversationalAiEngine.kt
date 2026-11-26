@@ -58,6 +58,19 @@ class ConversationalAiEngine(
             }
         }
 
+        // Answer calendar facts locally; a date/weekday question is not a reminder command.
+        val calendarAnswer = answerCalendarQuestion(cleanInput, referenceTimeMillis, timeZone)
+        if (calendarAnswer != null) {
+            return ConversationalResponse(
+                replyText = calendarAnswer,
+                newState = currentState.copy(
+                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                )
+            )
+        }
+
         // 2. Check for explicit corrections to previous statements ("نه، منظورم فردا نبود، پسفردا بود")
         if (isCorrection(cleanInput) && currentState.draftTask != null) {
             return handleCorrection(cleanInput, currentState, referenceTimeMillis, timeZone)
@@ -156,6 +169,54 @@ class ConversationalAiEngine(
         )
     }
 
+    /**
+     * Handles simple calendar questions that belong to reminder scheduling.
+     * It deliberately does not create or modify reminders.
+     */
+    private fun answerCalendarQuestion(
+        input: String,
+        referenceTimeMillis: Long,
+        timeZone: TimeZone
+    ): String? {
+        val normalized = input.lowercase()
+            .replace('‌', ' ')
+            .replace("ي", "ی")
+            .replace("ك", "ک")
+
+        val asksWeekday = normalized.contains("چند شنبه") ||
+            normalized.contains("چندشنبه") ||
+            normalized.contains("روز هفته")
+        val asksDayOfMonth = normalized.contains("چندمین روز ماه") ||
+            normalized.contains("چندمین روزِ ماه") ||
+            normalized.contains("چندم ماه") ||
+            normalized.contains("چندمه")
+
+        if (!asksWeekday && !asksDayOfMonth) return null
+
+        val dayOffset = when {
+            normalized.contains("پس فردا") || normalized.contains("پسفردا") -> 2
+            normalized.contains("فردا") -> 1
+            normalized.contains("امروز") -> 0
+            else -> return null
+        }
+
+        val targetCalendar = Calendar.getInstance(timeZone).apply {
+            timeInMillis = referenceTimeMillis
+            add(Calendar.DAY_OF_YEAR, dayOffset)
+        }
+        val targetTimestamp = targetCalendar.timeInMillis
+        val jalali = PersianDateEngine.timestampToJalali(targetTimestamp, timeZone)
+        val dayLabel = when (dayOffset) {
+            0 -> "امروز"
+            1 -> "فردا"
+            else -> "پس‌فردا"
+        }
+
+        return when {
+            asksWeekday -> "${dayLabel} ${PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)} است."
+            else -> "${dayLabel} روز ${PersianDateEngine.toPersianDigits(jalali.day)} ماه ${jalali.monthName} است."
+        }
+    }
     /**
      * Handles answering an active clarification question
      */
@@ -1288,7 +1349,9 @@ class ConversationalAiEngine(
             clarificationQuestion = analysis.clarificationQuestion,
             hasExplicitTitle = true,
             hasExplicitTime = analysis.targetTimestamp != null,
-            hasExplicitDate = analysis.targetTimestamp != null
+            hasExplicitDate = analysis.targetTimestamp != null,
+            repeatType = analysis.repeatType,
+            recurrenceDaysOfWeek = analysis.recurrenceDaysOfWeek
         )
 
         if (isAmbiguous) {
@@ -1371,32 +1434,87 @@ class ConversationalAiEngine(
         if (isConsultationOrAdviceQuestion(input)) return null
 
         val lower = input.lowercase().trim()
-        val isRoutineWord = lower.contains("معمولاً") || lower.contains("معمولا") || lower.contains("عادت دارم") || lower.contains("عادتمه") || lower.contains("برنامه هر روزمه")
-        val isWakeUp = lower.contains("بیدار") || lower.contains("پامیشم") || lower.contains("پا میشم") || lower.contains("بلند میشم")
-        val isSleep = lower.contains("می‌خوابم") || lower.contains("میخوابم") || lower.contains("خوابم")
+        val isRoutineWord = listOf(
+            "معمولاً", "معمولا", "عادت دارم", "عادتمه", "برنامه هر روزمه",
+            "هر روز", "روزانه", "هر شب", "هر صبح", "روال من", "روتین من"
+        ).any { lower.contains(it) }
+        val isWakeUp = lower.contains("بیدار میشم") || lower.contains("بیدار می‌شوم") ||
+            lower.contains("بیدار شوم") || lower.contains("پامیشم") ||
+            lower.contains("پا میشم") || lower.contains("بلند میشم") ||
+            lower.contains("بلند می‌شوم") || lower.contains("بیدار")
+        val isSleep = lower.contains("می‌خوابم") || lower.contains("میخوابم") ||
+            lower.contains("به خواب می‌روم") || lower.contains("به خواب میرم")
 
-        // User says e.g. "من معمولاً ساعت ۸ صبح بیدار میشم"
-        if ((isRoutineWord && (isWakeUp || isSleep)) || (isWakeUp && !lower.contains("یادم بنداز") && !lower.contains("تنظیم کن") && !lower.contains("زنگ بذار"))) {
-            val hour = extractNumber(lower) ?: 8
-            val formattedTime = PersianDateEngine.formatPersianTime(hour, 0)
-            val key = if (isSleep) "ساعت_خواب" else "ساعت_بیداری"
-            val toolRes = toolRegistry?.saveUserMemoryPreference(key, formattedTime, if (isSleep) "ساعت معمول خواب" else "ساعت معمول بیداری")
-            val label = if (isSleep) "خوابیدن" else "بیداری"
-            val reply = "ساعت $label شما ($formattedTime) در حافظه دستیار ثبت شد. از این پس در زمان‌بندی‌ها، پیشنهاد ساعات ورزش و قرارهای روزانه‌تان به این موضوع توجه خواهم کرد."
+        if (!isWakeUp && !isSleep) return null
+
+        // Explicit reminder commands must continue to the reminder-intent handler.
+        val hasExplicitReminderCommand = listOf(
+            "یادم بنداز", "یادم بیار", "یادم نره", "یادم باشه", "یادم بمونه",
+            "یادآوری کن", "یادآور بذار", "یادآور بگذار", "یادآور تنظیم کن",
+            "یادآور ثبت کن", "یادآور بساز", "یک یادآور", "یه یادآور",
+            "آلارم بذار", "آلارم بگذار", "آلارم تنظیم کن", "آلارم ست کن",
+            "هشدار بذار", "هشدار بگذار", "زنگ بذار", "زنگ بگذار",
+            "زنگ تنظیم کن", "زنگ ساعت", "کوک کن", "بیدارم کن",
+            "منو بیدار کن", "من رو بیدار کن", "تنظیم کن", "ثبت کن"
+        ).any { lower.contains(it) }
+        if (hasExplicitReminderCommand) return null
+
+        // A one-off waking/sleeping statement is not automatically a saved habit.
+        if (!isRoutineWord) {
             return ConversationalResponse(
-                replyText = reply,
+                replyText = "متوجه شدم. این جمله را به‌عنوان عادت دائمی ذخیره نکردم و هیچ یادآوری‌ای هم ثبت نکردم. اگر منظورتان تنظیم زنگ برای همین مورد است، ساعت را مشخص کنید.",
+                newState = state.copy(
+                    activeIntent = ConversationIntent.INFORMATIONAL_QA,
+                    awaitingField = AwaitingField.NONE,
+                    slotStatus = SlotFillingStatus.IDLE
+                ),
+                suggestedReplies = listOf("فقط خواستم اطلاع بدهم", "برای فردا ساعت ۷ زنگ بگذار")
+            )
+        }
+
+        // A duration such as "8 hours of sleep" is not a clock time.
+        // Require an explicit clock marker before saving a routine time.
+        val hour = extractNumber(lower)
+        val isSleepDuration = Regex(
+            """(?:[0-9۰-۹]+|یک|دو|سه|چهار|پنج|شش|هفت|هشت|نه|ده|یازده|دوازده)\s*ساعت\s*(?:می‌خوابم|میخوابم|می خوابم|خوابم)"""
+        ).containsMatchIn(lower)
+        val hasClockMarker = !isSleepDuration && (
+            lower.contains("ساعت") ||
+                listOf("صبح", "ظهر", "عصر", "شب", "نیمه شب").any { lower.contains(it) }
+            )
+        if (hour == null || hour !in 0..23 || !hasClockMarker) {
+            val label = if (isSleep) "خوابیدن" else "بیدار شدن"
+            return ConversationalResponse(
+                replyText = "متوجه شدم این بخشی از روال معمول شماست. اگر می‌خواهید ساعت $label را به خاطر بسپارم، ساعت دقیق را هم بگویید؛ تا آن زمان چیزی در حافظه ذخیره نکردم.",
                 newState = state.copy(
                     activeIntent = ConversationIntent.USER_ROUTINE_DECLARATION,
                     awaitingField = AwaitingField.NONE,
                     slotStatus = SlotFillingStatus.IDLE
                 ),
-                executedResult = toolRes,
-                suggestedReplies = listOf("به نظرت چه ساعتی ورزش کنم؟", "یادآور جدید", "برنامه فردا چیه؟")
+                suggestedReplies = listOf("ساعت ۷ صبح", "ساعت ۸ صبح", "ساعت ۱۱ شب")
             )
         }
-        return null
-    }
 
+        val formattedTime = PersianDateEngine.formatPersianTime(hour, 0)
+        val key = if (isSleep) "ساعت_خواب" else "ساعت_بیداری"
+        val toolRes = toolRegistry?.saveUserMemoryPreference(
+            key,
+            formattedTime,
+            if (isSleep) "ساعت معمول خواب" else "ساعت معمول بیداری"
+        )
+        val label = if (isSleep) "خوابیدن" else "بیداری"
+        val reply = "ساعت $label شما ($formattedTime) در حافظه دستیار ثبت شد. از این پس در زمان‌بندی‌ها، پیشنهاد ساعات ورزش و قرارهای روزانه‌تان به این موضوع توجه خواهم کرد."
+        return ConversationalResponse(
+            replyText = reply,
+            newState = state.copy(
+                activeIntent = ConversationIntent.USER_ROUTINE_DECLARATION,
+                awaitingField = AwaitingField.NONE,
+                slotStatus = SlotFillingStatus.IDLE
+            ),
+            executedResult = toolRes,
+            suggestedReplies = listOf("به نظرت چه ساعتی ورزش کنم؟", "یادآور جدید", "برنامه فردا چیه؟")
+        )
+    }
     private fun isConsultationOrAdviceQuestion(input: String): Boolean {
         val lower = input.lowercase().trim()
         if (lower.startsWith("سلام") || lower.startsWith("درود") || lower.contains("حالت چطوره") || lower.contains("چطوری") || lower.contains("خوبی")) return false
@@ -1470,7 +1588,31 @@ class ConversationalAiEngine(
         val hasClockTime = clean.contains("ساعت") && Regex("""ساعت\s*[\d۰-۹]{1,2}""").containsMatchIn(clean)
         val isConciseCalendarEntry = hasWeekday && hasClockTime && !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement
 
-        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry) {
+        // Natural spoken plans may omit "یادم بنداز" (e.g. "پس فردا ساعت سه و نیم بعدازظهر نون بخرم").
+        // Require a future date, a concrete time expression, and an actionable first-person verb.
+        val hasFutureDate = listOf("امروز", "فردا", "پس فردا", "پسفردا", "هفته بعد", "هفته آینده",
+            "شنبه", "یکشنبه", "دوشنبه", "سه شنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه").any { clean.contains(it) }
+        val hasTimeExpression = clean.contains("ساعت") || clean.contains("صبح") || clean.contains("ظهر") ||
+            clean.contains("عصر") || clean.contains("شب") || clean.contains("نیم ساعت") ||
+            clean.contains("یک ربع") || clean.contains("یه ربع")
+        val actionEndings = listOf("بخرم", "بگیرم", "برم", "بروم", "انجام بدم", "انجام دهم",
+            "تماس بگیرم", "زنگ بزنم", "پیگیری کنم", "تحویل بدم", "تحویل دهم")
+        val hasActionVerb = actionEndings.any { clean.endsWith(it) || clean.contains("$it ") }
+        val isImplicitTimedPlan = hasFutureDate && hasTimeExpression && hasActionVerb &&
+            !isEmotionalOrPhysiological && !isRoutineOrPersonalStatement &&
+            !clean.contains("?") && !clean.contains("؟")
+
+        // A clearly recurring, timed activity is an actionable reminder plan even when the user
+        // does not append an imperative such as "یادم بنداز" (including exercise/study routines).
+        val hasRecurringCadence = listOf("هر روز", "روزانه", "هر هفته", "هفتگی", "هر ماه", "ماهانه")
+            .any { clean.contains(it) }
+        val hasRecurringAction = hasActionVerb || clean.endsWith("کنم") ||
+            listOf("ورزش", "تمرین", "مطالعه", "درس", "جلسه", "تماس").any { clean.contains(it) }
+        val isImplicitRecurringTimedPlan = hasRecurringCadence && hasTimeExpression && hasRecurringAction &&
+            !isEmotionalOrPhysiological && !clean.contains("?") && !clean.contains("؟")
+
+        if (hasDirectTrigger || hasModTrigger || hasGeneralScheduleVerb || isConciseCalendarEntry ||
+            isImplicitTimedPlan || isImplicitRecurringTimedPlan) {
             return true
         }
 

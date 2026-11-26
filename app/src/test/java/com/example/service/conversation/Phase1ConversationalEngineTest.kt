@@ -278,7 +278,7 @@ class Phase1ConversationalEngineTest {
     }
 
     @Test
-    fun test18_WakeUpEarlyStatementDoesNotCreateReminder() = runBlocking {
+    fun test18_WakeUpEarlyStatementDoesNotCreateReminderOrSaveAnUnrequestedHabit() = runBlocking {
         val input = "فردا باید زود بیدار شوم."
         val response = engine.processTurn(
             userInput = input,
@@ -286,7 +286,35 @@ class Phase1ConversationalEngineTest {
             referenceTimeMillis = fixedReferenceMillis
         )
         assertNotEquals("«فردا باید زود بیدار شوم.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertNotEquals("یک برنامه یک‌باره نباید به‌عنوان عادت ذخیره شود", ConversationIntent.USER_ROUTINE_DECLARATION, response.newState.activeIntent)
+        assertFalse("نباید ادعای ذخیره ساعت پیش‌فرض کند", response.replyText.contains("در حافظه دستیار ثبت شد"))
         assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun routineWithoutAnExplicitHourDoesNotAssumeEightOClock() = runBlocking {
+        val response = engine.processTurn(
+            userInput = "من معمولاً بیدار میشم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(ConversationIntent.USER_ROUTINE_DECLARATION, response.newState.activeIntent)
+        assertTrue(response.replyText.contains("ساعت دقیق"))
+        assertTrue(response.replyText.contains("چیزی در حافظه ذخیره نکردم"))
+        assertFalse(response.replyText.contains("۰۸:۰۰"))
+    }
+
+    @Test
+    fun sleepDurationIsNotMisreadAsClockTimeForRoutine() = runBlocking {
+        val response = engine.processTurn(
+            userInput = "من معمولاً ۸ ساعت می‌خوابم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(ConversationIntent.USER_ROUTINE_DECLARATION, response.newState.activeIntent)
+        assertTrue(response.replyText.contains("ساعت دقیق"))
+        assertTrue(response.replyText.contains("چیزی در حافظه ذخیره نکردم"))
+        assertFalse(response.replyText.contains("در حافظه دستیار ثبت شد"))
     }
 
     @Test
@@ -299,6 +327,17 @@ class Phase1ConversationalEngineTest {
         )
         assertNotEquals("«ساعت ۱۲ شب ورزش کردن مناسب نیست.» نباید یادآور ایجاد کند", ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
         assertFalse("نباید در حال اسلات فیلینگ باشد", response.newState.isWaitingForAnswer())
+    }
+
+    @Test
+    fun wakeUpReminderWithRememberMePhraseStillUsesReminderFlow() = runBlocking {
+        val response = engine.processTurn(
+            userInput = "یادم نره فردا ساعت ۷ صبح بیدار شم",
+            currentState = ConversationState(),
+            referenceTimeMillis = fixedReferenceMillis
+        )
+        assertEquals(ConversationIntent.CREATE_REMINDER, response.newState.activeIntent)
+        assertNotNull(response.newState.draftTask)
     }
 
     @Test

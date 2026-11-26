@@ -38,7 +38,8 @@ data class AnalyzedCommandResult(
     val quickSuggestions: List<String>,
     val category: String = "عمومی",
     val priority: Int = 0,
-    val repeatType: String = "NONE"
+    val repeatType: String = "NONE",
+    val recurrenceDaysOfWeek: String? = null
 )
 
 object PersianCommandAnalyzer {
@@ -72,8 +73,11 @@ object PersianCommandAnalyzer {
         // 4. Extract Clock Time (Hour & Minute)
         val timeExtraction = extractClockTime(normalizedEnglish)
 
-        // 5. Extract Date / Weekday
-        val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone)
+        // Recurrence is parsed independently from the next occurrence date.
+        val recurrence = detectRecurrence(normalizedEnglish)
+
+        // Excluded weekdays must not become one-off target dates.
+        val dateExtraction = extractDate(normalizedEnglish, referenceTimeMillis, timeZone, recurrence.excludedWeekdays)
 
         // 6. Detect Ambiguity in Hour (e.g. "ساعت ۶" without morning/evening)
         val isHourAmbiguous = timeExtraction.hasExplicitHour && !timeExtraction.isPeriodSpecified && timeExtraction.rawHour in 1..11
@@ -150,6 +154,10 @@ object PersianCommandAnalyzer {
                 targetTimestamp = cal.timeInMillis
             }
 
+            if (targetTimestamp != null && recurrence.daysOfWeek.isNotEmpty()) {
+                targetTimestamp = moveToNextAllowedWeekday(targetTimestamp, recurrence.daysOfWeek, timeZone)
+            }
+
             if (targetTimestamp != null) {
                 calculatedWeekday = PersianDateEngine.getPersianWeekdayName(targetTimestamp, timeZone)
                 val jDate = PersianDateEngine.timestampToJalali(targetTimestamp, timeZone)
@@ -208,12 +216,7 @@ object PersianCommandAnalyzer {
             else -> 0
         }
 
-        val repeat = when {
-            clean.contains("هر روز") || clean.contains("روزانه") -> "DAILY"
-            clean.contains("هر هفته") || clean.contains("هفتگی") || clean.contains("هر جمعه") -> "WEEKLY"
-            clean.contains("هر ماه") || clean.contains("ماهانه") -> "MONTHLY"
-            else -> "NONE"
-        }
+        val repeat = recurrence.repeatType
 
         val category = when {
             clean.contains("جلسه") || clean.contains("قرارداد") || clean.contains("پروژه") || clean.contains("شرکت") || clean.contains("کار") -> "کاری"
@@ -244,7 +247,8 @@ object PersianCommandAnalyzer {
             quickSuggestions = suggestions,
             category = category,
             priority = priority,
-            repeatType = repeat
+            repeatType = repeat,
+            recurrenceDaysOfWeek = recurrence.daysOfWeek.takeIf { it.isNotEmpty() }?.joinToString(",")
         )
     }
 
@@ -536,10 +540,56 @@ object PersianCommandAnalyzer {
         val conflictMessage: String? = null
     )
 
+    private data class RecurrenceInfo(val repeatType: String, val daysOfWeek: Set<String> = emptySet(), val excludedWeekdays: Set<String> = emptySet())
+
+    /** Parse Persian weekly/daily recurrence without treating excluded weekdays as one-off dates. */
+    private fun detectRecurrence(input: String): RecurrenceInfo {
+        val text = normalizeText(input).replace("به‌جز", "به جز").replace("غیر‌از", "غیر از")
+        val weekdayNames = listOf("چهارشنبه", "پنجشنبه", "سه‌شنبه", "یکشنبه", "دوشنبه", "جمعه", "شنبه")
+        val tokenByWeekday = mapOf("شنبه" to "SAT", "یکشنبه" to "SUN", "دوشنبه" to "MON", "سه‌شنبه" to "TUE", "چهارشنبه" to "WED", "پنجشنبه" to "THU", "جمعه" to "FRI")
+        val excluded = linkedSetOf<String>()
+        val exclusionRegex = Regex("""(?:به\s*جز|غیر\s*از|به\s*استثنای)\s*(شنبه|یکشنبه|دوشنبه|سه‌شنبه|سه\s*شنبه|چهارشنبه|پنجشنبه|پنج‌شنبه|جمعه)""")
+        exclusionRegex.findAll(text).forEach { match -> excluded.add(normalizeWeekday(match.groupValues[1].replace(" ", ""))) }
+        val mentioned = linkedSetOf<String>()
+        weekdayNames.filter { it != "شنبه" }.forEach { day ->
+            if (text.contains(day)) mentioned.add(day)
+        }
+        // "شنبه" is a suffix of چهارشنبه/پنجشنبه/سه‌شنبه/یکشنبه/دوشنبه; count it only when standalone.
+        val withoutCompoundWeekdays = weekdayNames.filter { it != "شنبه" }.fold(text) { acc, day ->
+            acc.replace(day, " ")
+        }
+        if (withoutCompoundWeekdays.contains("شنبه")) mentioned.add("شنبه")
+        val allowed = (weekdayNames.toSet() - excluded).mapNotNull { tokenByWeekday[it] }.toSet()
+        val mentionedAllowed = (mentioned - excluded).mapNotNull { tokenByWeekday[it] }.toSet()
+        return when {
+            (text.contains("هر روز") || text.contains("روزانه")) && excluded.isNotEmpty() -> RecurrenceInfo("CUSTOM", allowed, excluded)
+            text.contains("هر روز") || text.contains("روزانه") -> RecurrenceInfo("DAILY", emptySet(), excluded)
+            text.contains("هر ماه") || text.contains("ماهانه") -> RecurrenceInfo("MONTHLY", emptySet(), excluded)
+            text.contains("هر هفته") || text.contains("هفتگی") || weekdayNames.any { text.contains("هر $it") } -> RecurrenceInfo("WEEKLY", mentionedAllowed, excluded)
+            excluded.isNotEmpty() -> RecurrenceInfo("CUSTOM", allowed, excluded)
+            else -> RecurrenceInfo("NONE")
+        }
+    }
+
+    private fun moveToNextAllowedWeekday(timestamp: Long, allowedTokens: Set<String>, timeZone: TimeZone): Long {
+        if (allowedTokens.isEmpty()) return timestamp
+        val cal = Calendar.getInstance(timeZone).apply { timeInMillis = timestamp }
+        repeat(8) {
+            val token = when (cal.get(Calendar.DAY_OF_WEEK)) {
+                Calendar.SATURDAY -> "SAT"; Calendar.SUNDAY -> "SUN"; Calendar.MONDAY -> "MON";
+                Calendar.TUESDAY -> "TUE"; Calendar.WEDNESDAY -> "WED"; Calendar.THURSDAY -> "THU";
+                Calendar.FRIDAY -> "FRI"; else -> ""
+            }
+            if (token in allowedTokens) return cal.timeInMillis
+            cal.add(Calendar.DAY_OF_YEAR, 1)
+        }
+        return timestamp
+    }
     private fun extractDate(
         clean: String,
         referenceTimeMillis: Long,
-        timeZone: TimeZone
+        timeZone: TimeZone,
+        excludedWeekdays: Set<String> = emptySet()
     ): ExtractedDate {
         var dayOffset: Int? = null
         var exactY: Int? = null
@@ -583,6 +633,7 @@ object PersianCommandAnalyzer {
         )
 
         for (w in orderedWeekdays) {
+            if (normalizeWeekday(w) in excludedWeekdays) continue
             if (clean.contains(w)) {
                 val canonicalWd = normalizeWeekday(w)
                 reqWeekday = canonicalWd
@@ -705,7 +756,7 @@ object PersianCommandAnalyzer {
     }
 
     private fun extractCleanTitle(rawText: String, matchedDate: String, matchedTime: String): String {
-        var t = PersianDateEngine.toEnglishDigits(rawText)
+        var t = PersianDateEngine.toEnglishDigits(normalizeText(rawText))
 
         if (matchedDate.isNotBlank()) {
             t = t.replace(PersianDateEngine.toEnglishDigits(matchedDate), " ")
@@ -716,7 +767,8 @@ object PersianCommandAnalyzer {
 
         // Remove conversational time words and weekdays
         t = t.replace(Regex("""(?:امروز|فردا|پس‌?فردا|پسفردا|پس\s+اون\s+فردا|همین\s+موقع|هفته\s+(?:بعد|آینده)|سال\s+(?:بعد|آینده))"""), " ")
-        t = t.replace(Regex("""(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)"""), " ")
+        t = t.replace(Regex("""(?:هر\s+روز|روزانه|هر\s+هفته|هفتگی|هر\s+ماه|ماهانه|به\s*جز\s*(?:شنبه|یکشنبه|دوشنبه|سه‌شنبه|چهارشنبه|پنجشنبه|جمعه)(?:‌?ها)?)"""), " ")
+        t = t.replace(Regex("""(?:چهارشنبه|پنج‌?شنبه|سه‌?شنبه|سه\s+شنبه|یکشنبه|دوشنبه|جمعه|شنبه)(?:[‌\s]?ها)?"""), " ")
         t = t.replace(Regex("""ساعت\s*[\d۰-۹]{1,2}(?::[\d۰-۹]{1,2})?\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)?"""), " ")
         t = t.replace(Regex("""[\d۰-۹]{1,2}\s*(?:صبح|عصر|شب|ظهر|بامداد|بعدازظهر)"""), " ")
         t = t.replace(Regex("""[\d۰-۹]+\s*(?:دقیقه|ساعت|روز|هفته|ماه)\s*(?:دیگه|بعد|دیگر)"""), " ")
@@ -732,7 +784,7 @@ object PersianCommandAnalyzer {
         t = t.replace(Regex("""\s+دارم\s*$"""), " ")
         t = t.replace(Regex("""\s+کنم\s*$"""), " ")
         t = t.replace(Regex("""\s+بگیرم\s*$"""), " ")
-        t = t.replace(Regex("""\s+بخوانم\s*$"""), " ")
+        t = t.replace(Regex("""\s+(?:بخرم|بگیرم|بخوانم|برم|بروم|انجام\s+بدم|انجام\s+دهم|زنگ\s+بزنم|پیگیری\s+کنم|تحویل\s+بدم|تحویل\s+دهم)\s*[،.!؟?]*\s*$"""), " ")
 
         t = t.trim().trim('،', ' ', '.', ':', '-')
         return t
@@ -760,6 +812,19 @@ object PersianCommandAnalyzer {
             .replace("نیم ساعت", "30 دقیقه")
             .replace("ده دقیقه", "10 دقیقه")
             .replace("بیست دقیقه", "20 دقیقه")
+
+        // Normalize common spoken half-hour expressions and "بعد از ظهر".
+        s = s.replace("بعد از ظهر", "بعدازظهر")
+            .replace("بعداز ظهر", "بعدازظهر")
+        val spokenHours = listOf(
+            "دوازده" to "12", "یازده" to "11", "ده" to "10", "نه" to "9",
+            "هشت" to "8", "هفت" to "7", "شش" to "6", "شیش" to "6",
+            "پنج" to "5", "چهار" to "4", "سه" to "3", "دو" to "2", "یک" to "1", "یه" to "1"
+        )
+        for ((word, digit) in spokenHours) {
+            s = s.replace("ساعت $word و نیم", "ساعت $digit و نیم")
+                .replace("ساعت $word و ربع", "ساعت $digit و ربع")
+        }
 
         // Written clock hours
         s = s.replace("ساعت بیست و چهار", "ساعت 24")
