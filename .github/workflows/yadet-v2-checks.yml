@@ -1,0 +1,36 @@
+name: Yadet 2 Foundation Checks
+
+on:
+  push:
+    branches:
+      - rebuild/yadet-v2-foundation
+  pull_request:
+    branches:
+      - rebuild/yadet-v2-foundation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Android unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Prepare optional local configuration
+        run: |
+          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+            cp .env.example .env
+          fi
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+      - name: Run unit tests
+        run: ./gradlew :app:testDebugUnitTest --stacktrace --no-daemon
