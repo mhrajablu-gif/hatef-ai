@@ -94,15 +94,16 @@ object RecurrenceCalculator {
         return if (day == Calendar.SATURDAY) 1 else day + 1
     }
 
-    /** Stable week bucket where Saturday is the first day of the week. */
+    /** Stable Gregorian day number; avoids DST-length weeks and epoch bucket drift. */
     private fun iranianWeekIndex(calendar: Calendar): Long {
-        val dayOffset = iranianWeekday(calendar) - 1
-        val midnight = calendar.clone() as Calendar
-        midnight.set(Calendar.HOUR_OF_DAY, 0)
-        midnight.set(Calendar.MINUTE, 0)
-        midnight.set(Calendar.SECOND, 0)
-        midnight.set(Calendar.MILLISECOND, 0)
-        midnight.add(Calendar.DAY_OF_YEAR, -dayOffset)
-        return Math.floorDiv(midnight.timeInMillis, 7L * 24L * 60L * 60L * 1000L)
+        val year = calendar.get(Calendar.YEAR)
+        val month = calendar.get(Calendar.MONTH) + 1
+        val day = calendar.get(Calendar.DAY_OF_MONTH)
+        val a = (14 - month) / 12
+        val y = year + 4800 - a
+        val m = month + 12 * a - 3
+        val julianDay = day + (153 * m + 2) / 5 + 365L * y +
+            y / 4 - y / 100 + y / 400 - 32045
+        return Math.floorDiv(julianDay - (iranianWeekday(calendar) - 1), 7L)
     }
 }
